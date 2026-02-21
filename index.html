@@ -1,0 +1,885 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Thư viện Nhóm CNPM - PTIT HCM</title>
+  <link rel="stylesheet" href="css/main.css?v=20260216b">
+</head>
+<body>
+  <div id="rulesModal" class="modal-overlay" style="display: none;">
+    <div class="modal-box" style="width: 700px; max-width: 90%;">
+      <span class="close-btn" onclick="toggleModal('rulesModal')">×</span>
+      
+      <h3 style="color: #ae2727; border-bottom: 2px solid #ae2727; padding-bottom: 10px; margin-top: 0;">
+        Nội quy thư viện
+      </h3>
+
+      <div style="text-align: left; line-height: 1.6; color: #333; max-height: 70vh; overflow-y: auto;">
+        <ol style="padding-left: 20px; margin-bottom: 15px;">
+          <li style="margin-bottom: 8px;">Mang theo thẻ thư viện / thẻ sinh viên để làm các thủ tục cần thiết hoặc sử dụng dịch vụ tại Thư viện Trung tâm; Không dùng thẻ thư viện của người khác và không cho người khác mượn thẻ.</li>
+          <li style="margin-bottom: 8px;">Không mang túi xách hoặc vật cồng kềnh vào Thư viện; Tự bảo quản tài sản cá nhân. Thư viện sẽ không giải quyết các trường hợp thất lạc hay mất mát tài sản của độc giả.</li>
+          <li style="margin-bottom: 8px;">Tuân thủ luật bản quyền khi sử dụng tài liệu tại Thư viện.</li>
+          <li style="margin-bottom: 8px;">Thực hiện và nhắc nhở người khác giữ gìn tài liệu, trang thiết bị và các tài sản chung của Thư viện.</li>
+          <li style="margin-bottom: 8px;">Giữ trật tự, yên tĩnh; tắt điện thoại di động tại những khu vực có dấu hiệu quy ước.</li>
+          <li>Giữ vệ sinh chung, không hút thuốc, không sử dụng các vật dễ cháy nổ trong Thư viện.</li>
+        </ol>
+        
+        <p style="background: #f9f9f9; padding: 10px; border-left: 4px solid #ae2727; font-style: italic; font-size: 0.9em;">
+          Độc giả nghiêm túc thực hiện Nội quy để xây dựng một môi trường học tập, nghiên cứu thuận tiện, văn minh. Các trường hợp vi phạm sẽ bị xử lý theo quy định.
+        </p>
+      </div>
+
+      <div style="text-align: center; margin-top: 15px;">
+        <button onclick="toggleModal('rulesModal')" style="background: #27ae60; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer;">Đã hiểu</button>
+      </div>
+    </div>
+  </div>
+  <div id="pdfModal" class="modal-overlay" style="display: none;">
+    <div class="modal-box" style="width: 80%; height: 80vh;">
+      <span class="close-btn" onclick="toggleModal('pdfModal')">×</span>
+      <h3 id="pdfTitle" style="color: var(--ptit-red); margin-top: 0;">ĐANG ĐỌC TÀI LIỆU</h3>
+      <iframe id="pdfViewer" src="" style="width: 100%; height: calc(100% - 40px); border: none;"></iframe>
+    </div>
+  </div>
+
+  <div id="loadingOverlay" class="loading-overlay" style="display: none;"><div class="spinner"></div></div>
+  <div id="toastContainer" class="toast-container"></div>
+
+  <div id="loginModal" class="modal-overlay" style="display: none;">
+    <div class="modal-box">
+      <span class="close-btn" onclick="toggleModal('loginModal')">×</span>
+      <h3 style="color: var(--ptit-red); text-align: center;">ĐĂNG NHẬP</h3>
+      <div style="margin-bottom: 15px;">
+        <label>Tên đăng nhập:</label><br>
+        <input type="text" id="username" placeholder="Tên đăng nhập" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ddd;">
+      </div>
+      <div style="margin-bottom: 20px;">
+        <label>Mật khẩu:</label><br>
+        <input type="password" id="password" placeholder="Nhập mật khẩu" style="width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ddd;">
+      </div>
+      <button onclick="handleLogin()" style="width: 100%; background: var(--ptit-red); color: white; padding: 12px; border: none; font-weight: bold; cursor: pointer; border-radius: 4px;">ĐĂNG NHẬP</button>
+    </div>
+  </div>
+
+  <div id="userLoanHistoryModal" class="modal-overlay" style="display:none;"
+       onclick="if(event.target.id==='userLoanHistoryModal') toggleModal('userLoanHistoryModal')">
+    <div class="modal-box" style="width: 1000px; max-width: 96%; max-height: 86vh; overflow: auto;">
+      <span class="close-btn" onclick="toggleModal('userLoanHistoryModal')">×</span>
+      <h3 id="userLoanHistoryTitle" style="margin:0 0 12px; color: var(--ptit-red);">Lịch sử mượn độc giả</h3>
+      <div id="userLoanHistoryStats" class="history-stats">Đang tải...</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Sách</th>
+            <th>Ngày mượn</th>
+            <th>Hạn trả</th>
+            <th>Ngày trả</th>
+            <th>Trạng thái</th>
+            <th>Quá hạn</th>
+            <th>Phạt</th>
+          </tr>
+        </thead>
+        <tbody id="userLoanHistoryTable"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="bookModal" class="modal-overlay" style="display: none;"
+     onclick="if(event.target.id==='bookModal') toggleModal('bookModal')">
+    <div class="modal-box" style="width: 460px; max-height: 85vh; overflow-y: auto;">
+        <span class="close-btn" onclick="toggleModal('bookModal')">×</span>
+        <h3 style="color: var(--ptit-red); text-align: center;" id="modalTitle">THÔNG TIN SÁCH</h3>
+        <form onsubmit="event.preventDefault(); handleSaveBook();">
+            <input type="hidden" id="bookId"> 
+            <div style="margin-bottom: 10px;">
+                <label>Tên sách:</label><br>
+                <input type="text" id="bookTitle" required style="width: 100%; padding: 8px;">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label>Tác giả:</label><br>
+                <input type="text" id="bookAuthor" required style="width: 100%; padding: 8px;">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label>Số lượng:</label><br>
+                <input type="number" id="bookStock" required min="0" style="width: 100%; padding: 8px;">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label>Người thêm:</label><br>
+                <input type="text" id="bookAddedBy" placeholder="VD: Admin" style="width: 100%; padding: 8px;">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label>Danh mục:</label><br>
+                <input type="text" id="bookCategory" placeholder="VD: Giáo trình / Tiểu thuyết" style="width: 100%; padding: 8px;">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label>Tag:</label><br>
+                <input type="text" id="bookTag" placeholder="VD: cnpm, javascript" style="width: 100%; padding: 8px;">
+            </div>
+            <div style="margin-bottom: 10px;">
+                <label>Năm xuất bản:</label><br>
+                <input type="number" id="bookYear" min="0" max="2100" step="1" placeholder="VD: 2025" style="width: 100%; padding: 8px;">
+            </div>
+            <div style="margin-bottom: 12px;">
+                <label>Nhà xuất bản:</label><br>
+                <input type="text" id="bookPublisher" placeholder="VD: NXB Giáo dục" style="width: 100%; padding: 8px;">
+            </div>
+            <button type="submit" class="btn-borrow">LƯU LẠI</button>
+        </form>
+    </div>
+  </div>
+<div id="guideModal" class="modal-overlay" style="display: none;">
+  <div class="modal-box" style="width: 700px; max-width: 95%;">
+    <span class="close-btn" onclick="toggleModal('guideModal')">×</span>
+    <h2 style="color: #c0392b; border-bottom: 2px solid #c0392b; padding-bottom: 10px; margin-top: 0;">
+      📖 Hướng dẫn mượn sách
+    </h2>
+    <div style="text-align: left; line-height: 1.6; color: #333; font-size: 16px;">
+      <p>Để mượn tài liệu tại thư viện, sinh viên vui lòng thực hiện theo quy trình sau:</p>
+      <div style="background: #fff5f5; padding: 15px; border-radius: 8px; border: 1px solid #ffcccc;">
+        <h4 style="margin: 5px 0 10px 0; color: #c0392b;">Bước 1: Đăng nhập hệ thống</h4>
+        <p style="margin: 0;">Sử dụng tài khoản sinh viên (Ví dụ: <b>sv01</b> / <b>123</b>) để truy cập hệ thống.</p>
+      </div>
+      <div style="margin-top: 15px; background: #fff5f5; padding: 15px; border-radius: 8px; border: 1px solid #ffcccc;">
+        <h4 style="margin: 5px 0 10px 0; color: #c0392b;">Bước 2: Tìm kiếm & Đăng ký</h4>
+        <p style="margin: 0;">Chọn sách và bấm nút <b style="color:red;">ĐĂNG KÝ MƯỢN</b>. Theo dõi trạng thái tại mục "Sách & Lịch sử".</p>
+      </div>
+      <div style="margin-top: 15px; background: #fff5f5; padding: 15px; border-radius: 8px; border: 1px solid #ffcccc;">
+        <h4 style="margin: 5px 0 10px 0; color: #c0392b;">Bước 3: Nhận sách</h4>
+        <p style="margin: 0;">Khi trạng thái chuyển sang <b style="color:green">Đang mượn</b>, vui lòng mang thẻ đến thư viện để nhận sách.</p>
+      </div>
+    </div>
+    <div style="text-align: center; margin-top: 20px;">
+      <button onclick="toggleModal('guideModal')" style="background: #c0392b; color: white; border: none; padding: 10px 30px; border-radius: 4px; cursor: pointer; font-weight: bold;">ĐÃ HIỂU</button>
+    </div>
+  </div>
+</div>
+  <header>
+    
+<div id="introContentModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box" style="width: 800px; max-width: 92%; padding: 22px;">
+    <span class="close-btn" onclick="toggleModal('introContentModal')">×</span>
+
+    <h3 id="introModalTitle" style="color: var(--ptit-red); margin: 0 0 10px 0;">
+      THÔNG TIN DÀNH CHO KHÁCH
+    </h3>
+
+    <div id="introModalBody" class="intro-modal-body"></div>
+
+    <div style="text-align:right; margin-top: 14px;">
+      <button class="btn-borrow" style="width:auto; padding:10px 16px;" onclick="toggleModal('introContentModal')">
+        Đóng
+      </button>
+    </div>
+  </div>
+</div>
+    <div class="header-inner">
+      <div class="logo-box"></div> 
+      <div class="school-name">
+        <h1>Học viện Công nghệ Bưu chính Viễn thông - Cơ sở TP.HCM</h1>
+        <h2>THƯ viện nhóm CN phần Mềm (PTIT LIBRARY)</h2>
+      </div>
+    </div>
+  </header>
+
+<nav class="top-nav">
+  <div class="nav-inner">
+
+    <!-- Nút hamburger: chỉ hiện trên mobile -->
+    <button class="nav-toggle" onclick="toggleMobileNav()" aria-label="Mở menu">☰</button>
+    <div class="nav-brand">MENU</div>
+
+    <!-- Menu PC: giữ nguyên (ẩn trên mobile) -->
+    <div class="nav-links">
+      <a href="#" onclick="showSection('home')">TRANG CHỦ</a>
+      <a href="#" onclick="showSection('about')">GIỚI THIỆU</a>
+      <a href="#" onclick="showSection('news')">TIN TỨC</a>
+      <a href="#" onclick="showSection('help')">TRỢ GIÚP</a>
+      <a href="#" onclick="showSection('contact')">LIÊN HỆ</a>
+      <a href="#" onclick="showSection('home')">TÌM KIẾM</a>
+    </div>
+
+    <!-- Góc phải (Hi/Đăng nhập) -->
+    <div class="nav-right">
+      <a href="#" class="login-btn" onclick="toggleModal('loginModal')" id="navLoginBtn">ĐĂNG NHẬP</a>
+    </div>
+
+  </div>
+
+  <!-- Dropdown mobile: chỉ hiện khi bấm ☰ -->
+  <div id="mobileNav" class="mobile-nav">
+    <a href="#" onclick="showSection('home'); closeMobileNav()">Trang chủ</a>
+    <a href="#" onclick="showSection('about'); closeMobileNav()">Giới thiệu</a>
+    <a href="#" onclick="showSection('news'); closeMobileNav()">Tin tức</a>
+    <a href="#" onclick="showSection('help'); closeMobileNav()">Trợ giúp</a>
+    <a href="#" onclick="showSection('contact'); closeMobileNav()">Liên hệ</a>
+    <a href="#" onclick="showSection('home'); closeMobileNav()">Tìm kiếm</a>
+
+    <div id="mobileMenuStudent" style="display:none;">
+      <a href="#" onclick="showSection('my-books'); closeMobileNav()">Sách & Lịch sử</a>
+      <a href="#" onclick="showSection('profile'); closeMobileNav()">Hồ sơ cá nhân</a>
+    </div>
+
+    <div id="mobileMenuAdmin" style="display:none;">
+      <a href="#" onclick="showSection('admin-approvals'); closeMobileNav()">Duyệt yêu cầu mượn</a>
+      <a href="#" onclick="showSection('admin-active-loans'); closeMobileNav()">Quản lý đang mượn</a>
+      <a href="#" onclick="showSection('admin-books'); closeMobileNav()">Quản lý sách</a>
+      <a href="#" onclick="showSection('admin-users'); closeMobileNav()">Quản lý độc giả</a>
+      <a href="#" onclick="showSection('dashboard'); closeMobileNav()">Thống kê</a>
+    </div>
+
+    <!-- nếu muốn “Hi, …” nằm trong menu mobile luôn thì để thêm dòng này -->
+    <!-- <a href="#" onclick="closeMobileNav()" id="mobileHi">Hi, ...</a> -->
+  </div>
+</nav>
+
+  <div class="container">
+    
+    <aside class="sidebar">
+      <div class="sidebar-box">  <div class="sidebar-title">DANH MỤC CHUNG</div>
+        <ul class="sidebar-list">
+          <li><a href="#" onclick="showSection('home')">🏠 Trang chủ</a></li>
+          
+          <li><a href="#" onclick="toggleModal('rulesModal')">📜 Nội quy thư viện</a></li>
+          
+          <li><a href="#" onclick="toggleModal('guideModal')">📖 Hướng dẫn mượn</a></li>
+          
+          <li><a href="#" onclick="alert('LIÊN HỆ:\n- Hotline: 0987.654.321\n- Email: library@ptit.edu.vn\n- Địa chỉ: 97 Man Thiện, Q9')">📞 Liên hệ Admin</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-box" id="menu-student" style="display: none;">
+        <div class="sidebar-title" style="background: #2ecc71;">KHU VỰC CÁ NHÂN</div>
+        <ul class="sidebar-list">
+          <li><a href="#" onclick="showSection('my-books')">📚 Sách & Lịch sử</a></li>
+          <li><a href="#" onclick="showSection('profile')">👤 Hồ sơ cá nhân</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-box" id="menu-admin" style="display: none;">
+        <div class="sidebar-title" style="background: #333;">QUẢN TRỊ</div>
+        <ul class="sidebar-list">
+          <li><a href="#" onclick="showSection('admin-approvals')">📝 Duyệt yêu cầu mượn</a></li>
+
+          <li><a href="#" onclick="showSection('admin-active-loans')">📖 Quản lý Đang mượn</a></li>
+          <li><a href="#" onclick="showSection('admin-books')">⚙️ Quản lý Sách</a></li>
+          <li><a href="#" onclick="showSection('admin-users')">👥 Quản lý Độc giả</a></li>
+          <li><a href="#" onclick="showSection('dashboard'); renderDashboard();">📊 Thống kê</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      
+      <div id="section-home">
+        <div class="search-section">
+          <select id="searchFilter" >
+            <option value="title">Tên sách</option>
+            <option value="author">Tác giả</option>
+          </select>
+          <input type="text" class="search-input" placeholder="Nhập từ khóa tìm kiếm..." id="mainSearch">
+        <button class="search-btn" onclick="handleSearch()">TÌM KIẾM</button>
+        </div>
+        <div class="book-grid" id="bookList"></div>
+
+        <div id="pagination" class="pagination-container"></div>
+      </div>
+<div id="section-about" style="display:none;">
+  <div class="section-header">
+    <h3 class="section-title">Giới thiệu</h3>
+  </div>
+
+  <div class="intro-panel">
+    <div class="intro-grid">
+
+      <button class="intro-item" onclick="openIntro('phutrach')">
+        <div class="intro-icon">👤</div>
+        <div class="intro-text">Phân công phụ trách</div>
+      </button>
+
+      <button class="intro-item" onclick="openIntro('bando')">
+        <div class="intro-icon">📍</div>
+        <div class="intro-text">Bản đồ các tầng – Trung tâm Truyền thông và Tri thức số</div>
+      </button>
+
+     <button class="intro-item" onclick="showSection('guest')">
+       <div class="intro-icon">📖</div>
+      <div class="intro-text">Thông tin dành cho khách</div>
+      </button>
+
+      <button class="intro-item" onclick="openIntro('lichsu')">
+        <div class="intro-icon">📚</div>
+        <div class="intro-text">Lịch sử hình thành và phát triển</div>
+      </button>
+
+      <button class="intro-item" onclick="openIntro('canbo')">
+        <div class="intro-icon">🗂️</div>
+        <div class="intro-text">Danh sách cán bộ</div>
+      </button>
+
+      <button class="intro-item" onclick="openIntro('cocau')">
+        <div class="intro-icon">🏛️</div>
+        <div class="intro-text">Cơ cấu tổ chức</div>
+      </button>
+
+      <button class="intro-item" onclick="showSection('chucnang')">
+        <div class="intro-icon">🏅</div>
+        <div class="intro-text">Chức năng – Nhiệm vụ</div>
+      </button>
+
+    </div>
+  </div>
+</div>
+<div id="section-chucnang" style="display:none;">
+  <div class="section-header">
+    <h3 class="section-title">Chức năng – Nhiệm vụ</h3>
+    <button class="btn-back" style="width:auto; padding:10px 14px;" onclick="showSection('about')">
+      ← Quay lại giới thiệu
+    </button>
+  </div>
+
+  <div class="profile-card" style="max-width: 900px;">
+    <p style="margin-top:0;">
+      <b>I. CHỨC NĂNG</b><br>
+      Trợ giúp, tham mưu cho Giám đốc đại học trong quản lý, điều hành và thực hiện công tác truyền thông,
+      quản trị thương hiệu; xây dựng, phát triển nguồn học liệu, tri thức số, Tạp chí Khoa học và Công nghệ
+      phục vụ đào tạo, nghiên cứu khoa học và quản trị, nhằm phát huy tối đa sức mạnh tri thức của Đại học.
+    </p>
+
+    <h4 style="margin:18px 0 8px;">II. NHIỆM VỤ</h4>
+
+    <p style="margin:0;">
+      1. Xây dựng kế hoạch truyền thông theo chiến lược phát triển thương hiệu; xây dựng, hướng dẫn và giám sát thực hiện
+      hệ thống văn bản quy định về công tác truyền thông.<br><br>
+
+      2. Xây dựng và quản trị hiệu quả các kênh truyền thông đa phương tiện chính thức: website, mạng xã hội,
+      đặc san bản in, newsletter, v.v...<br><br>
+
+      3. Tổ chức triển khai các hoạt động truyền thông chiến lược thông qua sự kiện, sản phẩm truyền thông
+      (tài liệu, tin, bài, hình ảnh, video,…) và hệ thống quà tặng thương hiệu.<br><br>
+
+      4. Quản trị và phát triển thương hiệu; quản lý thông tin, hình ảnh; đầu mối quan hệ báo chí; tham mưu xử lý khủng hoảng truyền thông.<br><br>
+
+      5. Tư vấn, hỗ trợ và giám sát các đơn vị triển khai hoạt động truyền thông, đảm bảo thống nhất thông tin, chuyên nghiệp và nhất quán.<br><br>
+
+      6. Quản lý nội dung truyền thông, hình thức tổ chức sự kiện và hoạt động truyền thông do đơn vị bên ngoài thực hiện trong khuôn viên.<br><br>
+
+      7. Xây dựng chiến lược, kế hoạch phát triển; tham mưu phương hướng tổ chức và hoạt động thông tin thư viện theo mô hình quản trị thông tin và tri thức số.<br><br>
+
+      8. Phát triển, quản trị và tổ chức khai thác nguồn lực tri thức: học liệu, sách, tài liệu/ấn phẩm khoa học công nghệ, luận án, luận văn, tài liệu số, v.v...<br><br>
+
+      9. Tạo lập và cung cấp sản phẩm, dịch vụ thông tin thư viện khoa học, hiện đại, hiệu quả; phát triển văn hoá đọc.<br><br>
+
+      10. Quản lý, xây dựng và thực hiện kế hoạch phát triển Tạp chí; triển khai dịch vụ xuất bản và công bố nhằm tăng uy tín và quảng bá.<br><br>
+
+      11. Thực hiện các nhiệm vụ khác do Giám đốc đại học giao.
+    </p>
+  </div>
+</div>
+<div id="section-guest" style="display:none;">
+  <div class="section-header">
+    <h3 class="section-title">Thông tin dành cho khách</h3>
+    <button class="btn-back" onclick="showSection('about')" style="width:auto;">
+      ← Quay lại giới thiệu
+    </button>
+  </div>
+
+  <div class="intro-panel" style="padding: 22px;">
+<p>
+  Chào mừng bạn đến với <b>Thư viện số Nhóm CNPM – PTIT TP.HCM</b>.
+  Hệ thống hỗ trợ tra cứu và quản lý tài liệu học tập, phục vụ nhu cầu học tập – nghiên cứu của sinh viên và giảng viên.
+</p>
+
+<h4>1) Tra cứu tài liệu</h4>
+<p>
+  Tra cứu theo Tên sách / Tác giả ngay trên website.<br>
+  Kết quả hiển thị tồn kho và cho phép đăng ký mượn (quản trị viên duyệt).
+</p>
+
+<h4>2) Tham quan và sử dụng tài liệu</h4>
+<p>
+  Khách tham quan có thể tìm hiểu quy trình mượn – trả và cách sử dụng hệ thống.<br>
+  Tài liệu số (PDF) có thể đọc trực tiếp trên website nếu được cấp quyền.
+</p>
+
+<h4>3) Đăng ký tài khoản/Thẻ bạn đọc</h4>
+<p>
+  Để sử dụng đầy đủ chức năng (đăng ký mượn, theo dõi lịch sử…), vui lòng đăng ký theo hướng dẫn của quản trị viên
+  hoặc liên hệ để được hỗ trợ.
+</p>
+
+<h4>4) Dịch vụ hỗ trợ</h4>
+<p>
+  Hướng dẫn sử dụng thư viện số.<br>
+  Tiếp nhận yêu cầu bổ sung tài liệu.<br>
+  Hỗ trợ thông tin theo nhu cầu học tập – nghiên cứu.
+</p>
+
+<div class="info-box">
+  <b>5) Liên hệ</b><br>
+  Địa chỉ: 97 Man Thiện, P. Tăng Nhơn Phú, TP. Thủ Đức, TP.HCM<br>
+  Email: library@ptit.edu.vn<br>
+  Hotline: 0987 654 321
+   </div>
+  </div>
+</div>
+      <div id="section-news" style="display:none;">
+  <div class="section-header"><h3 class="section-title">Tin tức</h3></div>
+  <div class="profile-card" style="max-width: 900px;">
+    <p><b>Cập nhật:</b> Đây là khu vực đang được nhóm bổ sung bài viết.</p>
+    <p>Bạn có thể dùng tính năng tìm kiếm để tra cứu sách, hoặc vào mục Trợ giúp để xem quy trình mượn-trả.</p>
+  </div>
+</div>
+
+<div id="section-help" style="display:none;">
+  <div class="section-header"><h3 class="section-title">Trợ giúp</h3></div>
+  <div class="profile-card" style="max-width: 900px;">
+    <p><b>Bước 1:</b> Đăng nhập tài khoản.</p>
+    <p><b>Bước 2:</b> Tìm sách theo tên/tác giả và bấm "Đăng ký mượn".</p>
+    <p><b>Bước 3:</b> Theo dõi trạng thái ở mục "Sách & Lịch sử".</p>
+    <p><b>Cần hỗ trợ:</b> Hotline 0987 654 321 - Email library@ptit.edu.vn</p>
+  </div>
+</div>
+
+<div id="section-contact" style="display:none;">
+  <div class="section-header"><h3 class="section-title">Liên hệ</h3></div>
+  <div class="contact-layout">
+    <div class="contact-main">
+      <div class="contact-map-card">
+        <iframe
+          class="contact-map"
+          title="Bản đồ thư viện PTIT - 97 Man Thiện"
+          src="https://maps.google.com/maps?q=97%20Man%20Thi%E1%BB%87n%2C%20TP%20Th%E1%BB%A7%20%C4%90%E1%BB%A9c%2C%20TP%20H%E1%BB%93%20Ch%C3%AD%20Minh&t=&z=15&ie=UTF8&iwloc=&output=embed"
+          loading="lazy"
+          referrerpolicy="no-referrer-when-downgrade"
+          allowfullscreen>
+        </iframe>
+      </div>
+
+      <div class="contact-info-card">
+        <h4>Thông tin liên hệ</h4>
+        <p><b>Địa chỉ:</b> 97 Man Thiện, TP Thủ Đức, TP.HCM</p>
+        <p><b>Email:</b> library@ptit.edu.vn</p>
+        <p><b>Hotline:</b> 0987 654 321</p>
+        <p><b>Giờ làm việc:</b> Thứ 2 - Thứ 7, 07:30 - 17:00</p>
+      </div>
+    </div>
+
+    <form id="contactFeedbackForm" class="contact-form-card" onsubmit="handleContactFeedback(event)">
+      <h4>Gửi phản hồi</h4>
+      <div class="contact-form-grid">
+        <label class="contact-field">
+          <span>Họ và tên</span>
+          <input id="contactName" type="text" placeholder="Nhập họ và tên" required>
+        </label>
+
+        <label class="contact-field">
+          <span>Email</span>
+          <input id="contactEmail" type="email" placeholder="you@example.com" required>
+        </label>
+
+        <label class="contact-field">
+          <span>Nội dung phản hồi</span>
+          <textarea id="contactMessage" rows="5" placeholder="Nhập nội dung cần hỗ trợ..." required></textarea>
+        </label>
+      </div>
+
+      <button type="submit" class="btn-borrow contact-submit-btn">Gửi phản hồi</button>
+      <p id="contactFeedbackMsg" class="contact-feedback-msg" aria-live="polite"></p>
+    </form>
+  </div>
+</div>
+<div id="section-my-books" style="display: none;">
+        <div class="section-header"><h3 class="section-title">Sách đang mượn / Chờ duyệt</h3></div>
+        <table class="data-table">
+            <thead><tr><th>Tên sách</th><th>Ngày mượn</th><th>Hạn trả</th><th>Trạng thái</th><th>Hành động</th></tr></thead>
+            <tbody id="myCurrentBookTable"></tbody>
+        </table>
+
+        <br><br>
+        <div class="section-header"><h3 class="section-title" style="color:#666">Lịch sử trả sách</h3></div>
+        <table class="data-table">
+            <thead><tr><th>Tên sách</th><th>Ngày mượn</th><th>Hạn trả</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead>
+            <tbody id="myHistoryBookTable"></tbody>
+        </table>
+      </div>
+
+<div id="section-admin-approvals" style="display: none;">
+  <div class="section-header" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+    <h3 class="section-title">Duyệt yêu cầu mượn sách</h3>
+
+    <!-- (tuỳ chọn) nút refresh -->
+    <button class="btn-table" type="button" onclick="loadData()">↻ Tải lại</button>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width:90px;">Mã</th>
+        <th style="width:160px;">Sinh viên</th>
+        <th>Sách</th>
+        <th style="width:120px;">Ngày ĐK</th>
+        <th style="width:170px;">Thao tác</th>
+      </tr>
+    </thead>
+    <tbody id="adminApprovalTable"></tbody>
+  </table>
+</div>
+
+<div id="section-admin-active-loans" style="display: none;">
+  <div class="section-header" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+    <h3 class="section-title">Danh sách sách đang cho mượn</h3>
+
+    <!-- ✅ Lọc quá hạn -->
+    <label style="display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer; user-select:none;">
+      <input type="checkbox" onchange="setOnlyOverdue(this.checked)">
+      Chỉ quá hạn
+    </label>
+  </div>
+
+  <div class="loan-tools">
+    <div class="loan-tools-row">
+      <label class="admin-inline-check">
+        <input type="checkbox" id="enablePenaltyCheckbox" onchange="togglePenaltyEnabled(this.checked)">
+        Tính phí phạt
+      </label>
+      <label class="admin-inline-check">
+        Phạt/ngày:
+        <input id="penaltyPerDayInput" type="number" min="0" value="5000" onchange="setPenaltyPerDay(this.value)" style="width: 120px;">
+      </label>
+      <span id="renewalRuleLabel" class="loan-rule-label"></span>
+    </div>
+
+    <div class="loan-tools-row">
+      <select id="directReturnUser" onchange="onDirectReturnUserChange()"></select>
+      <select id="directReturnLoan" onchange="updateDirectReturnHint()"></select>
+      <button type="button" class="btn-table btn-approve" onclick="handleDirectReturn(this)">Xác nhận trả trực tiếp</button>
+      <button type="button" class="btn-table" onclick="refreshDirectReturnOptions()">↻ Làm mới danh sách</button>
+    </div>
+    <div id="directReturnHint" class="loan-hint">Chọn độc giả và sách để trả trực tiếp.</div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width:90px;">Mã phiếu</th>
+        <th style="width:160px;">Người mượn</th>
+        <th>Tên sách</th>
+        <th style="width:120px;">Ngày mượn</th>
+        <th style="width:120px;">Hạn trả</th>
+        <th style="width:210px;">Tình trạng / Phạt / Thao tác</th>
+      </tr>
+    </thead>
+
+    <!-- ✅ renderAdminActiveLoans sẽ đổ vào đây -->
+    <tbody id="adminActiveLoansTable"></tbody>
+  </table>
+</div>
+
+
+      <div id="section-admin-users" style="display: none;">
+  <div class="section-header">
+    <h3 class="section-title">Danh sách độc giả</h3>
+
+    <div class="header-actions" style="display:flex; gap:10px; justify-content:flex-end;">
+      <button class="btn-by" type="button" onclick="toggleUserPanel()">
+        Tạo tài khoản mới
+      </button>
+    </div>
+  </div>
+
+  <!-- PANEL TẠO ĐỘC GIẢ (ẩn mặc định) -->
+  <div id="addUserPanel" class="roll-panel" hidden>
+    <div class="roll-head">
+      <div class="roll-title">Tạo tài khoản độc giả</div>
+      <button class="roll-close" type="button" onclick="closeUserPanel()" aria-label="Đóng">×</button>
+    </div>
+
+    <form id="addUserForm" onsubmit="handleAddUserPanel(event)">
+      <div class="roll-grid">
+        <div class="roll-field">
+          <label>Username (MSSV/Mã GV)</label>
+          <input id="uUsername" type="text" placeholder="VD: N21DCCN004" required>
+        </div>
+
+        <div class="roll-field">
+          <label>Họ tên</label>
+          <input id="uName" type="text" placeholder="Nguyễn Văn A" required>
+        </div>
+
+        <div class="roll-field">
+          <label>Email</label>
+          <input id="uEmail" type="email" placeholder="sv@ptithcm.edu.vn" required>
+        </div>
+
+        <div class="roll-field">
+          <label>Lớp/Đơn vị</label>
+          <input id="uClass" type="text" placeholder="VD: D21CQCN02 hoặc BM CNTT" required>
+        </div>
+
+        <div class="roll-field">
+          <label>Khoa/Bộ môn (dept)</label>
+          <input id="uDept" type="text" placeholder="VD: CNTT" required>
+        </div>
+
+        <div class="roll-field">
+          <label>Mật khẩu</label>
+          <input id="uPass" type="text" placeholder="VD: 123" required>
+        </div>
+
+        <div class="roll-field roll-full">
+          <label>Vai trò</label>
+          <select id="uRole" required>
+            <option value="student" selected>Sinh viên</option>
+            <option value="lecturer">Giảng viên</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="roll-actions">
+        <button type="submit" class="btn-borrow" style="width:auto;">Tạo tài khoản</button>
+        <button type="button" class="btn-table" onclick="closeUserPanel()">Hủy</button>
+      </div>
+
+      <div id="addUserMsg" class="roll-msg" style="display:none;"></div>
+    </form>
+  </div>
+
+  <!-- BẢNG GIỮ NGUYÊN -->
+  <table class="data-table">
+    <thead>
+      <tr><th>Username</th><th>Họ tên</th><th>Trạng thái</th><th>Hành động</th></tr>
+    </thead>
+    <tbody id="userTable"></tbody>
+  </table>
+</div>
+
+<div id="section-admin-books" style="display: none;">
+  <div class="section-header">
+    <h3 class="section-title">Quản lý đầu sách</h3>
+
+    <div class="header-actions" style="display:flex; gap:10px; justify-content:flex-end;">
+      <!-- Panel thủ công -->
+      <button class="btn-by" type="button" onclick="toggleRollPanel()">
+        👥 Thêm thủ công
+      </button>
+
+      <button class="btn-borrow" type="button" onclick="openAddModal()">
+        + Thêm sách mới
+      </button>
+    </div>
+  </div>
+
+  <!-- ✅ PANEL ROLL (ẩn mặc định) -->
+  <div id="addBookPanel" class="roll-panel" hidden>
+    <div class="roll-head">
+      <div class="roll-title">Thêm sách thủ công</div>
+
+      <!-- ✅ Dấu X để đóng -->
+      <button class="roll-close" type="button" onclick="closeAddPanel()" aria-label="Đóng">×</button>
+    </div>
+
+   <form onsubmit="handleAddBookPanel(event); return false;">
+      <div class="roll-grid">
+        <div class="roll-field">
+          <label>Tên sách</label>
+          <input id="pTitle" type="text" placeholder="Tên sách..." required>
+        </div>
+
+        <div class="roll-field">
+          <label>Tác giả</label>
+          <input id="pAuthor" type="text" placeholder="Tác giả..." required>
+        </div>
+
+        <div class="roll-field">
+          <label>Tồn kho</label>
+          <input id="pStock" type="number" min="0" value="0" required>
+        </div>
+
+        <div class="roll-field">
+          <label>URL ảnh bìa</label>
+          <input id="pImg" type="url" placeholder="https://...">
+        </div>
+
+        <div class="roll-field roll-full">
+          <label>Người thêm</label>
+          <select id="pAddedBy" required>
+            <option value="" disabled selected>Chọn người thêm...</option>
+            <option value="Tâm">Tâm</option>
+            <option value="Thiên">Thiên</option>
+            <option value="Na">Na</option>
+            <option value="Niên">Niên</option>
+            <option value="Giang">Giang</option>
+            <option value="Nhân">Nhân</option>
+
+          </select>
+        </div>
+
+        <div class="roll-field">
+          <label>Danh mục</label>
+          <input id="pCategory" type="text" placeholder="VD: Giáo trình">
+        </div>
+
+        <div class="roll-field">
+          <label>Tag</label>
+          <input id="pTag" type="text" placeholder="VD: cnpm, ai">
+        </div>
+
+        <div class="roll-field">
+          <label>Năm xuất bản</label>
+          <input id="pYear" type="number" min="0" max="2100" step="1" placeholder="VD: 2025">
+        </div>
+
+        <div class="roll-field">
+          <label>Nhà xuất bản</label>
+          <input id="pPublisher" type="text" placeholder="VD: NXB Trẻ">
+        </div>
+
+        <div class="roll-field roll-full">
+          <label>Mô tả (tuỳ chọn)</label>
+          <textarea id="pDesc" rows="3" placeholder="Mô tả ngắn..."></textarea>
+        </div>
+      </div>
+
+      <div class="roll-actions">
+        <button type="submit" class="btn-borrow" style="width:auto;">Thêm sách</button>
+        <button type="button" class="btn-table" onclick="closeAddPanel()">Hủy</button>
+      </div>
+
+      <div id="addBookMsg" class="roll-msg" style="display:none;"></div>
+    </form>
+  </div>
+
+  <div class="admin-book-tools">
+    <div class="admin-book-tools-row">
+      <input id="adminBookKeyword" type="text" placeholder="Tìm theo từ khóa..." oninput="applyAdminBookFilters()">
+
+      <select id="adminBookFilterField" onchange="applyAdminBookFilters()">
+        <option value="title">Lọc: Tên sách</option>
+        <option value="author">Lọc: Tác giả</option>
+        <option value="addedBy">Lọc: Người thêm</option>
+        <option value="category">Lọc: Danh mục</option>
+        <option value="publisher">Lọc: NXB</option>
+        <option value="tag">Lọc: Tag</option>
+      </select>
+
+      <label class="admin-inline-check">
+        <input type="checkbox" id="adminLowStockOnly" onchange="applyAdminBookFilters()">
+        Chỉ tồn kho thấp
+      </label>
+
+      <input id="adminLowStockThreshold" type="number" min="0" value="3" title="Ngưỡng tồn kho thấp" oninput="applyAdminBookFilters()" onchange="applyAdminBookFilters()">
+
+      <select id="adminBookSort" onchange="applyAdminBookFilters()">
+        <option value="newest">Sắp xếp: Mới thêm gần đây</option>
+        <option value="stockAsc">Sắp xếp: Tồn kho tăng dần</option>
+        <option value="stockDesc">Sắp xếp: Tồn kho giảm dần</option>
+        <option value="titleAsc">Sắp xếp: Tên A-Z</option>
+      </select>
+
+      <button class="btn-table" type="button" onclick="resetAdminBookFilters()">Đặt lại</button>
+    </div>
+
+    <div class="admin-book-tools-row">
+      <input id="adminBookImportFile" type="file" accept=".xlsx,.xls,.csv">
+      <button class="btn-table btn-approve" type="button" onclick="importBooksExcel(this)">⬆ Import Excel</button>
+      <button class="btn-table" type="button" onclick="exportBooksExcel(this)">⬇ Export Excel</button>
+      <button class="btn-table" type="button" onclick="downloadBookImportTemplate()">📄 Tải mẫu</button>
+      <button class="btn-table" type="button" onclick="loadData()">↻ Tải lại</button>
+    </div>
+
+    <div id="adminBookFilterSummary" class="admin-book-summary">Đang tải dữ liệu sách...</div>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Tên tài liệu</th>
+        <th>Tác giả</th>
+        <th>Danh mục</th>
+        <th>Tag</th>
+        <th>NXB</th>
+        <th>Năm</th>
+        <th>Người thêm</th>
+        <th>Tồn kho</th>
+        <th>Ngày thêm</th>
+        <th>Thao tác</th>
+      </tr>
+    </thead>
+    <tbody id="adminBookTable"></tbody>
+  </table>
+</div>
+
+      <div id="section-dashboard" style="display: none;">
+        <div class="section-header"><h3 class="section-title">Tổng quan hệ thống</h3></div>
+        <div class="stats-grid">
+          <div class="stat-card blue"><h3>Tổng đầu sách</h3><p id="stat-total-titles">0</p></div>
+          <div class="stat-card green"><h3>Tổng tồn kho</h3><p id="stat-total-stock">0</p></div>
+          <div class="stat-card orange"><h3>Đang cho mượn</h3><p id="stat-borrowed">0</p></div>
+          <div class="stat-card red"><h3>Sắp hết hàng</h3><p id="stat-low-stock">0</p></div>
+        </div>
+        <div style="margin-top: 20px; padding: 15px; background: #fff; border: 1px solid #ddd; border-radius: 5px;">
+          <h4 style="margin-top: 0; color: #555;"> Các cuốn sách sắp hết (Dưới 2 cuốn)</h4>
+          <ul id="low-stock-list" style="padding-left: 20px; color: #c0392b;"></ul>
+        </div>
+      </div>
+      
+     <div id="section-profile" style="display: none;">
+        <div class="section-header"><h3 class="section-title">Hồ sơ độc giả</h3></div>
+        
+        <div class="profile-card">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div style="width: 80px; height: 80px; background: #eee; border-radius: 50%; margin: 0 auto; line-height: 80px; font-size: 30px;">👤</div>
+                
+                <h3 id="profileNameDisplay" style="margin: 10px 0 5px 0;">Đang tải...</h3>
+                <p id="profileIdDisplay" style="color: gray; margin: 0;">(MSSV)</p>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+
+            <form onsubmit="event.preventDefault(); handleChangePassword();">
+                <h4 style="color: #ae2727; margin-bottom: 15px;">🔐 Đổi mật khẩu</h4>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="font-weight: bold; display: block; margin-bottom: 5px;">Mật khẩu mới:</label>
+                    <input type="password" id="newPass" placeholder="Nhập mật khẩu mới" 
+                           style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+                </div>
+
+                <div style="margin-bottom: 20px;">
+                    <label style="font-weight: bold; display: block; margin-bottom: 5px;">Xác nhận mật khẩu:</label>
+                    <input type="password" id="confirmPass" placeholder="Nhập lại mật khẩu mới" 
+                           style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+                </div>
+
+                <button type="submit" class="btn-borrow" style="width: 100%; padding: 12px;">LƯU THAY ĐỔI</button>
+            </form>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-col" style="width: 60%;">
+        <h4>Liên hệ Nhóm Công nghệ phần mềm</h4>
+        <p><strong></strong> Địa chỉ: 97 Man Thiện, P. Tăng Nhơn Phú, TP. Hồ Chí Minh</p>
+      </div>
+      <div class="footer-col" style="width: 35%;">
+        <h4>Thống kê</h4>
+        <p>© 2026 Developed by Tam - PTIT</p>
+      </div>
+    </div>
+  </footer>
+
+
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="js/main.js?v=20260216d" type="module"></script>
+
+</body>
+</html>
+
+
