@@ -1,6 +1,14 @@
 ﻿const { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, setDoc, getDoc, onSnapshot } = window.fs;
 const runTransactionFn = window.fs.runTransaction;
 const db = window.db;
+const authApi = window.authApi || {};
+const auth = authApi.auth || null;
+const sendPasswordResetEmailFn = authApi.sendPasswordResetEmail;
+const fetchSignInMethodsForEmailFn = authApi.fetchSignInMethodsForEmail;
+const signInWithEmailAndPasswordFn = authApi.signInWithEmailAndPassword;
+const createUserWithEmailAndPasswordFn = authApi.createUserWithEmailAndPassword;
+const updatePasswordFn = authApi.updatePassword;
+const signOutFn = authApi.signOut;
 
 const usersCollection = window.usersCollection;
 const booksCollection = window.booksCollection;
@@ -92,6 +100,19 @@ function normalizeText(value) {
   return String(value ?? "").trim();
 }
 
+function normalizeEmail(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalizeEmail(value));
+}
+
+function generateBootstrapPassword() {
+  const randomPart = Math.random().toString(36).slice(2, 10);
+  return `Tmp#${randomPart}A1`;
+}
+
 function normalizeComparableText(value) {
   return normalizeText(value)
     .toLowerCase()
@@ -134,7 +155,10 @@ function normalizeBookYear(value) {
   if (!raw) return "";
   const year = Number(raw);
   if (!Number.isFinite(year)) return "";
-  return Math.trunc(year);
+  const normalizedYear = Math.trunc(year);
+  const currentYear = new Date().getFullYear();
+  if (normalizedYear < 1000 || normalizedYear > currentYear + 1) return "";
+  return normalizedYear;
 }
 
 function normalizeBookStock(value) {
@@ -178,6 +202,20 @@ async function findUserDocByUsername(rawUsername) {
   for (const candidate of candidates) {
     const snap = await getDoc(doc(db, "users", candidate));
     if (snap.exists()) return { id: candidate, data: snap.data() };
+  }
+  return null;
+}
+
+async function findUserDocByEmail(rawEmail) {
+  const targetEmail = normalizeEmail(rawEmail);
+  if (!isValidEmail(targetEmail)) return null;
+
+  const snapshot = await getDocs(usersCollection);
+  for (const item of snapshot.docs) {
+    const data = item.data() || {};
+    if (normalizeEmail(data.email) === targetEmail) {
+      return { id: item.id, data };
+    }
   }
   return null;
 }
@@ -857,6 +895,208 @@ window.seedData = async function() {
                 alert("Xong!"); loadData();
             } catch (e) { alert("Lỗi: " + e.message); }
         }
+function setForgotPasswordStep(step, emailValue = "") {
+  const formStep = document.getElementById("forgotPasswordStepForm");
+  const doneStep = document.getElementById("forgotPasswordStepDone");
+  const emailInput = document.getElementById("forgotPasswordEmailInput");
+  const emailSent = document.getElementById("forgotPasswordEmailSent");
+  if (!formStep || !doneStep) return;
+
+  if (step === "done") {
+    formStep.style.display = "none";
+    doneStep.style.display = "block";
+    if (emailSent) emailSent.value = normalizeEmail(emailValue);
+    return;
+  }
+
+  doneStep.style.display = "none";
+  formStep.style.display = "block";
+  if (emailInput && emailValue) emailInput.value = normalizeEmail(emailValue);
+}
+
+window.openForgotPasswordModal = function() {
+            const loginModal = document.getElementById("loginModal");
+            const forgotModal = document.getElementById("forgotPasswordModal");
+            if (!forgotModal) return;
+
+            if (loginModal) loginModal.style.display = "none";
+            setForgotPasswordStep("form");
+            forgotModal.style.display = "flex";
+
+            const emailInput = document.getElementById("forgotPasswordEmailInput");
+            if (emailInput) {
+              emailInput.focus();
+              emailInput.select?.();
+            }
+        }
+
+window.closeForgotPasswordModal = function() {
+            const forgotModal = document.getElementById("forgotPasswordModal");
+            if (forgotModal) forgotModal.style.display = "none";
+            setForgotPasswordStep("form");
+
+            const emailInput = document.getElementById("forgotPasswordEmailInput");
+            if (emailInput) emailInput.value = "";
+            const emailSent = document.getElementById("forgotPasswordEmailSent");
+            if (emailSent) emailSent.value = "";
+        }
+
+window.openLoginFromForgot = function() {
+            window.closeForgotPasswordModal?.();
+            const loginModal = document.getElementById("loginModal");
+            if (loginModal) loginModal.style.display = "flex";
+        }
+
+window.openMailClient = function() {
+            const emailSent = document.getElementById("forgotPasswordEmailSent");
+            const email = normalizeEmail(emailSent?.value || "");
+            if (!email) return;
+            window.open("https://mail.google.com", "_blank", "noopener,noreferrer");
+        }
+
+window.requestPasswordReset = function() {
+            window.openForgotPasswordModal?.();
+        }
+
+window.sendResetPasswordEmail = async function(triggerBtn) {
+            const run = async () => {
+              const emailInput = document.getElementById("forgotPasswordEmailInput");
+              if (!emailInput) return;
+
+              const email = normalizeEmail(emailInput.value);
+              if (!isValidEmail(email)) {
+                alert("Email không đúng định dạng.");
+                emailInput.focus();
+                return;
+              }
+
+              if (!auth || typeof sendPasswordResetEmailFn !== "function") {
+                alert("Chưa cấu hình Firebase Authentication cho tính năng quên mật khẩu.");
+                return;
+              }
+
+              let profile = null;
+              let profileLookupFailed = false;
+              try {
+                profile = await findUserDocByEmail(email);
+              } catch (profileErr) {
+                profileLookupFailed = true;
+                console.warn("Cannot query user profile for reset flow:", profileErr);
+              }
+
+              if (!profile && !profileLookupFailed) {
+                alert("Không tìm thấy tài khoản ứng với email này.");
+                return;
+              }
+
+              const showResetError = (err) => {
+                const code = String(err?.code || "");
+                if (code === "auth/too-many-requests") {
+                  alert("Bạn thao tác quá nhiều lần. Vui lòng thử lại sau.");
+                  return;
+                }
+                if (code === "auth/invalid-email") {
+                  alert("Email không hợp lệ.");
+                  return;
+                }
+                if (code === "auth/operation-not-allowed") {
+                  alert("Email/Password chưa được bật trong Firebase Authentication.");
+                  return;
+                }
+                alert("Không thể gửi email lúc này: " + (err?.message || "Lỗi không xác định."));
+              };
+
+              const tryBootstrapAuthAccount = async () => {
+                if (!profile) return false;
+                const canBootstrapAuth = !auth.currentUser && typeof createUserWithEmailAndPasswordFn === "function";
+                if (!canBootstrapAuth) return false;
+
+                try {
+                  const tempPassword = generateBootstrapPassword();
+                  await createUserWithEmailAndPasswordFn(auth, email, tempPassword);
+                } catch (bootstrapErr) {
+                  const bootstrapCode = String(bootstrapErr?.code || "");
+                  if (bootstrapCode !== "auth/email-already-in-use") {
+                    if (bootstrapCode === "auth/operation-not-allowed") {
+                      alert("Email/Password chưa được bật trong Firebase Authentication.");
+                      return null;
+                    }
+                    if (bootstrapCode === "auth/invalid-email") {
+                      alert("Email không hợp lệ.");
+                      return null;
+                    }
+                    alert("Không thể khởi tạo reset cho tài khoản này: " + (bootstrapErr.message || "Lỗi không xác định."));
+                    return null;
+                  }
+                } finally {
+                  if (
+                    typeof signOutFn === "function" &&
+                    auth.currentUser &&
+                    normalizeEmail(auth.currentUser.email || "") === email
+                  ) {
+                    try {
+                      await signOutFn(auth);
+                    } catch (signErr) {
+                      console.warn("Could not sign out bootstrap account:", signErr);
+                    }
+                  }
+                }
+                return true;
+              };
+
+              if (typeof fetchSignInMethodsForEmailFn === "function") {
+                try {
+                  const methods = await fetchSignInMethodsForEmailFn(auth, email);
+                  if (profile && Array.isArray(methods) && methods.length === 0) {
+                    const bootstrapResult = await tryBootstrapAuthAccount();
+                    if (bootstrapResult === null) return;
+                    if (!bootstrapResult) {
+                      alert("Email này chưa kích hoạt chức năng đặt lại mật khẩu. Vui lòng liên hệ admin.");
+                      return;
+                    }
+                  }
+                } catch (methodErr) {
+                  console.warn("Could not inspect sign-in methods:", methodErr);
+                }
+              }
+
+              let sendErr = null;
+              try {
+                await sendPasswordResetEmailFn(auth, email);
+              } catch (firstErr) {
+                sendErr = firstErr;
+              }
+
+              if (sendErr && String(sendErr?.code || "") === "auth/user-not-found") {
+                const bootstrapResult = await tryBootstrapAuthAccount();
+                if (bootstrapResult === null) return;
+                if (!bootstrapResult) {
+                  alert("Email này chưa kích hoạt chức năng đặt lại mật khẩu. Vui lòng liên hệ admin.");
+                  return;
+                }
+                sendErr = null;
+                try {
+                  await sendPasswordResetEmailFn(auth, email);
+                } catch (retryErr) {
+                  sendErr = retryErr;
+                }
+              }
+
+              if (sendErr) {
+                showResetError(sendErr);
+                return;
+              }
+
+              setForgotPasswordStep("done", email);
+              window.showToast?.("Đã gửi email đặt lại mật khẩu.", "success");
+            };
+
+            if (triggerBtn && window.runWithButtonBusy) {
+              return window.runWithButtonBusy(triggerBtn, "Đang gửi...", run);
+            }
+            if (window.withLoading) return window.withLoading(run);
+            return run();
+        }
 // H�M �ANG NH?P (KI?M TRA TR?C TI?P TR�N FIREBASE)
 window.handleLogin = async function() {
             console.log("?? B?t d?u dang nh?p...");
@@ -896,28 +1136,85 @@ window.handleLogin = async function() {
                         alert("Tài khoản đã bị KHÓA. Liên hệ admin!");
                         return;
                     }
-                    // So s�nh m?t kh?u (Luu �: pass tr�n Firebase ph?i gi?ng h?t pass nh?p v�o)
-                    if (String(userData.pass) === String(p)) {
-                        alert(`Xin chào, ${userData.name}!`);
-                        
-                        // Luu user v�o b? nh? tr�nh duy?t
-                        currentUser = {
-                          ...userData,
-                          username: userData.username || matchedUserId
-                        };
-                        syncState();
-                        localStorage.setItem('library_user', JSON.stringify(currentUser));
-                        
-                        // ?n b?ng dang nh?p & C?p nh?t giao di?n
-                        toggleModal('loginModal');
-                        checkUserStatus();
-                        
-                        // X�a tr?ng � nh?p
-                        uInput.value = "";
-                        pInput.value = "";
-                    } else {
+                    const legacyMatch = String(userData.pass ?? "") === String(p);
+                    const accountEmail = normalizeEmail(userData.email);
+                    let authVerified = false;
+
+                    if (auth && typeof signInWithEmailAndPasswordFn === "function" && isValidEmail(accountEmail)) {
+                        try {
+                            await signInWithEmailAndPasswordFn(auth, accountEmail, p);
+                            authVerified = true;
+                        } catch (signErr) {
+                            if (legacyMatch && typeof createUserWithEmailAndPasswordFn === "function") {
+                                try {
+                                    await createUserWithEmailAndPasswordFn(auth, accountEmail, p);
+                                    authVerified = true;
+                                } catch (createErr) {
+                                    const createCode = String(createErr?.code || "");
+                                    if (createCode === "auth/email-already-in-use") {
+                                        alert("Mật khẩu không đúng!");
+                                        return;
+                                    }
+                                    if (createCode === "auth/operation-not-allowed") {
+                                        alert("Email/Password chưa được bật trong Firebase Authentication.");
+                                        return;
+                                    }
+                                    if (createCode === "auth/invalid-email") {
+                                        alert("Email tài khoản không hợp lệ. Liên hệ admin để cập nhật email.");
+                                        return;
+                                    }
+                                    console.error(createErr);
+                                    if (!legacyMatch) {
+                                        alert("Mật khẩu không đúng!");
+                                        return;
+                                    }
+                                }
+                            } else if (!legacyMatch) {
+                                alert("Mật khẩu không đúng!");
+                                return;
+                            }
+                        }
+                    } else if (!legacyMatch) {
                         alert("Mật khẩu không đúng!");
+                        return;
                     }
+
+                    if (authVerified && !legacyMatch) {
+                        try {
+                            await updateDoc(doc(db, "users", matchedUserId), { pass: p });
+                            userData.pass = p;
+                        } catch (syncErr) {
+                            console.warn("Could not sync password back to user profile:", syncErr);
+                        }
+                    }
+                    if (!authVerified && auth && auth.currentUser && typeof signOutFn === "function") {
+                        const authEmail = normalizeEmail(auth.currentUser.email || "");
+                        if (!authEmail || authEmail !== accountEmail) {
+                            try {
+                                await signOutFn(auth);
+                            } catch (signOutErr) {
+                                console.warn("Could not clear mismatched auth session:", signOutErr);
+                            }
+                        }
+                    }
+
+                    alert(`Xin chào, ${userData.name}!`);
+
+                    // Luu user v�o b? nh? tr�nh duy?t
+                    currentUser = {
+                      ...userData,
+                      username: userData.username || matchedUserId
+                    };
+                    syncState();
+                    localStorage.setItem('library_user', JSON.stringify(currentUser));
+
+                    // ?n b?ng dang nh?p & C?p nh?t giao di?n
+                    toggleModal('loginModal');
+                    checkUserStatus();
+
+                    // X�a tr?ng � nh?p
+                    uInput.value = "";
+                    pInput.value = "";
                 } else {
                     alert("Tài khoản này không tồn tại!");
                 }
@@ -933,17 +1230,35 @@ window.handleLogin = async function() {
             }
         }
 
-        window.handleLogout = function() {
+window.handleLogout = async function() {
+            try {
+                if (auth && typeof signOutFn === "function") {
+                    await signOutFn(auth);
+                }
+            } catch (e) {
+                console.warn("Auth signOut failed:", e);
+            }
             currentUser = null;
             syncState();
             localStorage.removeItem('library_user');
+            if (window.location.hash !== "#/search") {
+                window.location.hash = "#/search";
+            }
             location.reload();
         }
 window.checkUserStatus = function() {
             // 1. L?y user t? b? nh? n?u chua c� bi?n currentUser
             if(!currentUser) {
                 const saved = localStorage.getItem('library_user');
-                if(saved) currentUser = JSON.parse(saved);
+                if (saved) {
+                    try {
+                        const parsed = JSON.parse(saved);
+                        currentUser = parsed && typeof parsed === "object" ? parsed : null;
+                    } catch (err) {
+                        console.warn("Invalid localStorage session. Clearing cached user.", err);
+                        localStorage.removeItem('library_user');
+                    }
+                }
             }
             syncState();
 
@@ -1490,11 +1805,37 @@ window.renderDashboard = function() {
             // A. T�nh to�n s? li?u
             const totalTitles = books.length; // T?ng d?u s�ch
             // C?ng d?n t?t c? s? lu?ng t?n kho (d�ng h�m reduce)
-            const totalStock = books.reduce((sum, book) => sum + Number(book.stock), 0);
+            const totalStock = books.reduce((sum, book) => {
+                const stock = Number(book.stock);
+                return sum + (Number.isFinite(stock) ? stock : 0);
+            }, 0);
             // �?m s? phi?u c� tr?ng th�i 'active' (dang mu?n)
             const borrowedCount = loans.filter(l => l.status === 'active').length;
-            // T�m s�ch s?p h?t (s? lu?ng < 5)
-            const lowStockBooks = books.filter(b => b.stock < 5);
+            // T�m s�ch s?p h?t (dưới 2 cuốn) và gộp trùng theo tên
+            const lowStockThreshold = 2;
+            const groupedByTitle = new Map();
+            books.forEach((b) => {
+                const rawTitle = normalizeText(b.title);
+                const key = normalizeComparableText(rawTitle || String(b.id || ""));
+                const stock = Number.isFinite(Number(b.stock)) ? Number(b.stock) : 0;
+                const displayTitle = rawTitle && rawTitle.length > 1 && !/^\d+$/.test(rawTitle)
+                  ? rawTitle
+                  : `Mã sách ${String(b.id || "").slice(0, 6)}`;
+
+                if (!groupedByTitle.has(key)) {
+                  groupedByTitle.set(key, {
+                    title: displayTitle,
+                    stock: Math.max(0, stock)
+                  });
+                  return;
+                }
+
+                const entry = groupedByTitle.get(key);
+                entry.stock += Math.max(0, stock);
+            });
+            const lowStockBooks = Array.from(groupedByTitle.values())
+              .filter((b) => b.stock < lowStockThreshold)
+              .sort((a, b) => a.stock - b.stock || a.title.localeCompare(b.title, "vi"));
 
             // B. �?y s? li?u ra m�n h�nh HTML
             // (Luu �: C�c ID n�y ph?i kh?p v?i b�n HTML c?a b?n)
@@ -1517,12 +1858,9 @@ window.renderDashboard = function() {
                 } else {
                     lowStockBooks.forEach((b) => {
                         const rawTitle = String(b.title || "").trim();
-                        const normalizedTitle = rawTitle && rawTitle.length > 1 && !/^\d+$/.test(rawTitle)
-                          ? rawTitle
-                          : `Mã sách ${String(b.id || "").slice(0, 6)}`;
-                        const displayTitle = normalizedTitle === normalizedTitle.toLowerCase()
-                          ? normalizedTitle.charAt(0).toLocaleUpperCase("vi-VN") + normalizedTitle.slice(1)
-                          : normalizedTitle;
+                        const displayTitle = rawTitle === rawTitle.toLowerCase()
+                          ? rawTitle.charAt(0).toLocaleUpperCase("vi-VN") + rawTitle.slice(1)
+                          : rawTitle;
 
                         elList.innerHTML += `<li><b>${toSafeText(displayTitle)}</b> (Chỉ còn: ${b.stock})</li>`;
                     });
@@ -1564,7 +1902,7 @@ window.renderUsers = async function() {
   let roleHtml = "";
   if (u.role === "admin") {
     roleHtml = `<span style="color:red; font-weight:bold;">Admin</span>`;
-  } else if (u.role === "lecturer" || (u.username || "").startsWith("gv")) {
+  } else if (u.role === "lecturer" || String(u.username || userId || "").toLowerCase().startsWith("gv")) {
     roleHtml = `<span style="color:blue; font-weight:bold;">Giảng viên</span>`;
   } else {
     roleHtml = `<span style="color:green;">Sinh viên</span>`;
@@ -1773,7 +2111,17 @@ window.handleChangePassword = async function() {
             btn.disabled = true;
 
             try {
-                // 4. C?p nh?t l�n Firebase
+                const canUpdateAuthPassword =
+                  auth &&
+                  auth.currentUser &&
+                  typeof updatePasswordFn === "function" &&
+                  normalizeEmail(auth.currentUser.email || "") === normalizeEmail(currentUser.email || "");
+
+                if (canUpdateAuthPassword) {
+                    await updatePasswordFn(auth.currentUser, newPass);
+                }
+
+                // 4. C?p nh?t l�n Firestore
                 const userRef = doc(db, "users", currentUser.username);
                 await updateDoc(userRef, { pass: newPass });
 
@@ -1789,7 +2137,11 @@ window.handleChangePassword = async function() {
 
             } catch (e) {
                 console.error(e);
-                alert("Lỗi: " + e.message);
+                if (String(e?.code || "") === "auth/requires-recent-login") {
+                    alert("Phiên đăng nhập đã cũ. Vui lòng đăng xuất rồi đăng nhập lại để đổi mật khẩu.");
+                } else {
+                    alert("Lỗi: " + e.message);
+                }
             }
 
             btn.innerText = oldText;
@@ -2168,7 +2520,15 @@ window.handleAddUserPanel = async function (e) {
     const roleRaw = String(document.getElementById('uRole').value || '').toLowerCase();
     const role = roleRaw === 'lecturer' ? 'lecturer' : 'student';
 
-    if (!username || !name || !email || !className || !dept || !pass) return;
+    if (!username || !name || !email || !className || !dept || !pass) {
+        if (msg) {
+            msg.style.display = 'block';
+            msg.textContent = "Vui lòng nhập đầy đủ thông tin bắt buộc.";
+            msg.style.background = 'rgba(198,40,40,.10)';
+            msg.style.color = '#b71c1c';
+        }
+        return;
+    }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
     if (!emailRegex.test(email)) {
         if (msg) {

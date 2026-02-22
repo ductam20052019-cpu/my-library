@@ -4,6 +4,15 @@ import {
   getFirestore, collection, getDocs, addDoc, deleteDoc,
   doc, updateDoc, setDoc, getDoc, onSnapshot, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import {
+  getAuth,
+  sendPasswordResetEmail,
+  fetchSignInMethodsForEmail,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updatePassword,
+  signOut
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 // Cau hinh Firebase
 const firebaseConfig = {
@@ -18,6 +27,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 // Collections
 const booksCollection = collection(db, "books");
@@ -26,9 +36,19 @@ const usersCollection = collection(db, "users");
 
 // Day ra window de file khac dung
 window.db = db;
+window.auth = auth;
 window.booksCollection = booksCollection;
 window.loansCollection = loansCollection;
 window.usersCollection = usersCollection;
 
 // Day cac ham Firestore ra window
 window.fs = { collection, getDocs, addDoc, deleteDoc, doc, updateDoc, setDoc, getDoc, onSnapshot, runTransaction };
+window.authApi = {
+  auth,
+  sendPasswordResetEmail,
+  fetchSignInMethodsForEmail,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updatePassword,
+  signOut
+};

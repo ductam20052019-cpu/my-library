@@ -440,6 +440,24 @@ function sectionIdFromHash(hashValue = window.location.hash) {
   return ROUTE_SECTION_IDS[route] || null;
 }
 
+function getSectionAccessUser() {
+  const liveUser = window.currentUser;
+  if (liveUser && typeof liveUser === "object") return liveUser;
+
+  try {
+    const raw = localStorage.getItem("library_user");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function isAdminOnlySection(sectionId) {
+  return sectionId === "dashboard" || String(sectionId || "").startsWith("admin-");
+}
+
 function syncHashForSection(sectionId) {
   const route = DYNAMIC_SECTION_ROUTES[sectionId];
   if (!route) return;
@@ -467,15 +485,20 @@ window.showSection = function (sectionId, options = {}) {
   const closeMobile = options.closeMobile !== false;
   if (closeMobile) window.closeMobileNav?.();
 
+  const requestedSectionId = String(sectionId || "").trim();
+  const accessUser = getSectionAccessUser();
+  const deniedAdminSection = isAdminOnlySection(requestedSectionId) && accessUser?.role !== "admin";
+  const resolvedSectionId = deniedAdminSection ? "home" : requestedSectionId;
+
   const allSections = document.querySelectorAll('[id^="section-"]');
   allSections.forEach((sec) => (sec.style.display = "none"));
 
-  const target = document.getElementById("section-" + sectionId) || document.getElementById("section-home");
+  const target = document.getElementById("section-" + resolvedSectionId) || document.getElementById("section-home");
   if (!target) return;
   target.style.display = "block";
 
   const activeSectionId = target.id.replace(/^section-/, "");
-  if (!options.skipHashSync) syncHashForSection(activeSectionId);
+  if (!options.skipHashSync || deniedAdminSection) syncHashForSection(activeSectionId);
 
   if (activeSectionId === "my-books") return window.renderStudentLoans?.();
   if (activeSectionId === "admin-approvals") return window.renderAdminApprovals?.();
@@ -516,12 +539,25 @@ window.initHashRouter = function () {
   });
 };
 
+function initSafeHashAnchors() {
+  if (window.__safeHashAnchorsReady) return;
+  window.__safeHashAnchorsReady = true;
+
+  document.addEventListener("click", (event) => {
+    const anchor = event.target.closest?.('a[href="#"]');
+    if (!anchor) return;
+    event.preventDefault();
+  });
+}
+
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
+    initSafeHashAnchors();
     window.initHashRouter?.();
     window.applyRouteFromHash?.();
   }, { once: true });
 } else {
+  initSafeHashAnchors();
   window.initHashRouter?.();
   window.applyRouteFromHash?.();
 }
