@@ -1,0 +1,129 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Create roles/{authUid} with { role: "admin" } for admin accounts.
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/roles/$(request.auth.uid))
+        && get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == "admin";
+    }
+
+    function isSeedAdmin() {
+      return signedIn()
+        && request.auth.uid == "2rEc9TY961QMmj9VF3e6JdP428y2"
+        && request.auth.token.email == "lb@ptithcm.edu.vn";
+    }
+
+    function isSelfAuthUid(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isSelfProfile() {
+      return signedIn() && resource.data.authUid == request.auth.uid;
+    }
+
+    function isSelfUsernameIndex(username) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/usernames/$(username))
+        && get(/databases/$(database)/documents/usernames/$(username)).data.authUid == request.auth.uid;
+    }
+
+    function currentUsername() {
+      return exists(/databases/$(database)/documents/authUsers/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/authUsers/$(request.auth.uid)).data.userId
+        : "";
+    }
+
+    function isOwnLoan(data) {
+      return signedIn()
+        && (
+          data.userAuthUid == request.auth.uid
+          || (data.username is string && data.username == currentUsername())
+        );
+    }
+
+    match /roles/{uid} {
+      allow get: if isSelfAuthUid(uid) || isAdmin();
+      allow list, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        || (isSeedAdmin()
+          && isSelfAuthUid(uid)
+          && request.resource.data.role == "admin");
+    }
+
+    match /usernames/{username} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isAdmin()
+        || (isSeedAdmin()
+          && username == "ADMIN"
+          && request.resource.data.userId == "admin"
+          && request.resource.data.authUid == request.auth.uid
+          && request.resource.data.role == "admin")
+        || (signedIn()
+          && request.resource.data.authUid == request.auth.uid
+          && request.resource.data.userId == username);
+      allow delete: if isAdmin();
+    }
+
+    match /authUsers/{uid} {
+      allow get: if isSelfAuthUid(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update: if isAdmin()
+        || (isSelfAuthUid(uid) && request.resource.data.userId is string);
+      allow delete: if isAdmin();
+    }
+
+    match /users/{username} {
+      allow get: if isAdmin()
+        || (isSeedAdmin() && username == "admin")
+        || isSelfProfile()
+        || isSelfUsernameIndex(username);
+      allow list: if isAdmin();
+      allow create: if isAdmin()
+        || (isSeedAdmin()
+          && username == "admin"
+          && request.resource.data.authUid == request.auth.uid
+          && request.resource.data.role == "admin");
+      allow update: if isAdmin()
+        || (isSeedAdmin()
+          && username == "admin"
+          && request.resource.data.authUid == request.auth.uid
+          && request.resource.data.role == "admin")
+        || ((isSelfProfile() || isSelfUsernameIndex(username))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "pass",
+            "password",
+            "passwordHash",
+            "authUid",
+            "authProvider",
+            "passwordManagedBy",
+            "lastLoginAt",
+            "passwordUpdatedAt",
+            "mustChangePassword",
+            "passwordMigrationRequiredAt"
+          ]));
+      allow delete: if isAdmin();
+    }
+
+    match /books/{bookId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /loans/{loanId} {
+      allow get, list: if isAdmin() || isOwnLoan(resource.data);
+      allow create: if isOwnLoan(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
