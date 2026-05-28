@@ -397,11 +397,15 @@ const STATIC_SECTION_IDS = new Set(["about", "guest", "news", "help", "contact",
 const DYNAMIC_SECTION_ROUTES = {
   home: "search",
   "my-books": "my-books",
+  favorites: "favorites",
+  notifications: "notifications",
   profile: "profile",
   "admin-approvals": "admin/approvals",
+  "admin-reservations": "admin/reservations",
   "admin-active-loans": "admin/loans",
   "admin-books": "admin/books",
   "admin-users": "admin/users",
+  "admin-logs": "admin/logs",
   dashboard: "admin/dashboard"
 };
 const ROUTE_SECTION_IDS = Object.entries(DYNAMIC_SECTION_ROUTES).reduce((acc, [sectionId, route]) => {
@@ -410,10 +414,14 @@ const ROUTE_SECTION_IDS = Object.entries(DYNAMIC_SECTION_ROUTES).reduce((acc, [s
 }, {});
 const LEGACY_ROUTE_ALIASES = {
   home: "search",
+  favorites: "favorites",
+  notifications: "notifications",
   "admin-books": "admin/books",
   "admin-users": "admin/users",
   "admin-approvals": "admin/approvals",
+  "admin-reservations": "admin/reservations",
   "admin-active-loans": "admin/loans",
+  "admin-logs": "admin/logs",
   dashboard: "admin/dashboard"
 };
 
@@ -444,7 +452,7 @@ function getSectionAccessUser() {
   const liveUser = window.currentUser;
   if (!liveUser || typeof liveUser !== "object") return null;
 
-  if (liveUser.role === "admin") {
+  if (isStaffRole(liveUser.role)) {
     const authUser = window.auth?.currentUser || null;
     const hasFirebaseSession =
       !!authUser &&
@@ -458,8 +466,23 @@ function getSectionAccessUser() {
   return liveUser;
 }
 
+function isAdminRole(role) {
+  return String(role || "").toLowerCase() === "admin";
+}
+
+function isStaffRole(role) {
+  const normalized = String(role || "").toLowerCase();
+  return normalized === "admin" || normalized === "librarian";
+}
+
 function isAdminOnlySection(sectionId) {
   return sectionId === "dashboard" || String(sectionId || "").startsWith("admin-");
+}
+
+function canAccessSection(sectionId, user) {
+  if (!isAdminOnlySection(sectionId)) return !!user || sectionId === "home";
+  if (sectionId === "admin-users" || sectionId === "admin-logs") return isAdminRole(user?.role);
+  return isStaffRole(user?.role);
 }
 
 function syncHashForSection(sectionId) {
@@ -491,7 +514,7 @@ window.showSection = function (sectionId, options = {}) {
 
   const requestedSectionId = String(sectionId || "").trim();
   const accessUser = getSectionAccessUser();
-  const deniedAdminSection = isAdminOnlySection(requestedSectionId) && accessUser?.role !== "admin";
+  const deniedAdminSection = isAdminOnlySection(requestedSectionId) && !canAccessSection(requestedSectionId, accessUser);
   const resolvedSectionId = deniedAdminSection ? "home" : requestedSectionId;
 
   const allSections = document.querySelectorAll('[id^="section-"]');
@@ -505,10 +528,14 @@ window.showSection = function (sectionId, options = {}) {
   if (!options.skipHashSync || deniedAdminSection) syncHashForSection(activeSectionId);
 
   if (activeSectionId === "my-books") return window.renderStudentLoans?.();
+  if (activeSectionId === "favorites") return window.renderFavorites?.();
+  if (activeSectionId === "notifications") return window.renderNotifications?.();
   if (activeSectionId === "admin-approvals") return window.renderAdminApprovals?.();
+  if (activeSectionId === "admin-reservations") return window.renderAdminReservations?.();
   if (activeSectionId === "admin-active-loans") return window.renderAdminActiveLoans?.();
   if (activeSectionId === "dashboard") return window.renderDashboard?.();
   if (activeSectionId === "admin-users") return window.renderUsers?.();
+  if (activeSectionId === "admin-logs") return window.renderActivityLogs?.();
   if (activeSectionId === "admin-books") {
     window.syncAdminBookControls?.();
     return window.renderAdminBooks?.();
@@ -655,8 +682,12 @@ function buildBookActionButton(book, currentUser, loans) {
     return `<button class="btn-borrow" style="background:gray" onclick="alert('Đăng nhập đi!')">ĐĂNG NHẬP</button>`;
   }
 
-  if (currentUser.role === "admin") {
-    return `<button class="btn-borrow" style="background:red" onclick="deleteBook('${book.id}', this)">XÓA</button>`;
+  if (isStaffRole(currentUser.role)) {
+    return `
+      <div class="card-actions">
+        <button class="btn-table" onclick="openBookCodeModal('${book.id}')">Mã</button>
+        <button class="btn-table btn-reject" onclick="deleteBook('${book.id}', this)">Xóa</button>
+      </div>`;
   }
 
   const myLoan = loans.find(
@@ -672,10 +703,30 @@ function buildBookActionButton(book, currentUser, loans) {
   if (myLoan) {
     return `<button class="btn-borrow" style="background:#f1c40f; color:black" disabled>CHỜ DUYỆT</button>`;
   }
+
+  const favorites = window.favorites || [];
+  const reservations = window.reservations || [];
+  const isFavorite = favorites.some((f) => f.bookId === book.id && f.username === currentUser.username);
+  const waitingReservation = reservations.find(
+    (r) =>
+      r.username === currentUser.username &&
+      r.bookId === book.id &&
+      r.status === "waiting"
+  );
+  const favoriteBtn = `
+    <button class="btn-table favorite-toggle ${isFavorite ? "is-favorite" : ""}"
+      title="${isFavorite ? "Bỏ yêu thích" : "Thêm yêu thích"}"
+      onclick="toggleFavoriteBook('${book.id}', this)">
+      ${isFavorite ? "★" : "☆"}
+    </button>`;
+
   if (Number(book.stock) <= 0) {
-    return `<button class="btn-borrow" style="background:#bdc3c7" disabled>HẾT SÁCH</button>`;
+    const reserveBtn = waitingReservation
+      ? `<button class="btn-borrow" style="background:#7f8c8d" disabled>ĐÃ ĐẶT TRƯỚC</button>`
+      : `<button class="btn-borrow" onclick="reserveBook('${book.id}', this)">ĐẶT TRƯỚC</button>`;
+    return `<div class="card-actions">${favoriteBtn}${reserveBtn}</div>`;
   }
-  return `<button class="btn-borrow" onclick="requestBorrow('${book.id}', this)">ĐĂNG KÝ MƯỢN</button>`;
+  return `<div class="card-actions">${favoriteBtn}<button class="btn-borrow" onclick="requestBorrow('${book.id}', this)">ĐĂNG KÝ MƯỢN</button></div>`;
 }
 
 function getFilteredHomeBooks(sourceBooks, state) {
@@ -692,7 +743,7 @@ window.renderAdminBooks = function () {
   const adminTable = document.getElementById("adminBookTable");
   const summaryEl = document.getElementById("adminBookFilterSummary");
   const currentUser = window.currentUser || null;
-  if (!adminTable || currentUser?.role !== "admin") return;
+  if (!adminTable || !isStaffRole(currentUser?.role)) return;
 
   const dataState = getAppDataState();
   const books = window.books || [];
@@ -748,6 +799,7 @@ window.renderAdminBooks = function () {
         <td>${escapeHtml(createdAtText)}</td>
         <td>
           <div class="action-group">
+            <button class="btn-table" onclick="openBookCodeModal('${book.id}')">Mã</button>
             <button class="btn-table btn-approve" onclick="openEditModal('${book.id}')">Sửa</button>
             <button class="btn-table btn-reject" onclick="deleteBook('${book.id}', this)">Xóa</button>
           </div>
@@ -771,7 +823,7 @@ window.renderAll = function () {
     if (!dataState.initialLoaded && dataState.loading) {
       list.innerHTML = `<div style="text-align:center; width:100%; color: gray; grid-column: 1/-1; padding: 20px;"><h3>Đang tải dữ liệu sách...</h3></div>`;
       window.renderPagination?.(0);
-      if (currentUser?.role === "admin") window.renderAdminBooks?.();
+      if (isStaffRole(currentUser?.role)) window.renderAdminBooks?.();
       return;
     }
 
@@ -811,7 +863,7 @@ window.renderAll = function () {
     }
   }
 
-  if (currentUser?.role === "admin") window.renderAdminBooks?.();
+  if (isStaffRole(currentUser?.role)) window.renderAdminBooks?.();
 };
 
 window.renderPagination = function (totalItems) {

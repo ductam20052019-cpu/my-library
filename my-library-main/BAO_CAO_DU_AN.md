@@ -179,14 +179,17 @@ Phạm vi đã thực hiện:
 - Khu vực cá nhân của độc giả.
 - Khu vực quản trị dành cho admin.
 - Quản lý sách, quản lý độc giả, duyệt mượn, trả sách và thống kê.
+- Đặt trước sách khi hết tồn kho, quản lý hàng chờ đặt trước.
+- Sách yêu thích, thông báo trong hệ thống và nhật ký thao tác quản trị.
+- Hiển thị mã QR/mã vạch cho đầu sách và dashboard thống kê bằng biểu đồ.
+- Bổ sung vai trò thủ thư để phân quyền chi tiết hơn.
 - Cấu hình Firebase Hosting, Firebase Authentication và Cloud Firestore.
 
 Phạm vi chưa thực hiện:
 
 - Thanh toán phí phạt trực tuyến.
-- Quét mã QR hoặc mã vạch cho sách vật lý.
 - Gửi email tự động khi sách sắp đến hạn trả.
-- Báo cáo thống kê nâng cao theo tháng, học kỳ hoặc khoa.
+- Báo cáo thống kê học kỳ/khoa chuyên sâu dạng xuất file.
 - Backend riêng để xử lý các nghiệp vụ phức tạp.
 
 ## 1.5. Đối tượng sử dụng hệ thống
@@ -670,8 +673,7 @@ Một số hạn chế hiện tại:
 
 - Chưa có thanh toán phí phạt trực tuyến.
 - Chưa có thông báo tự động qua email khi gần đến hạn trả.
-- Chưa hỗ trợ quét mã QR/mã vạch cho sách vật lý.
-- Chưa có báo cáo thống kê chuyên sâu theo thời gian.
+- Báo cáo thống kê mới dừng ở mức biểu đồ trực quan trên dashboard, chưa xuất báo cáo học kỳ/khoa dạng file.
 - Dữ liệu lớn cần tối ưu truy vấn Firestore và phân trang server-side.
 - Một số nội dung tĩnh như tin tức vẫn còn ở mức minh họa.
 
@@ -690,6 +692,9 @@ Sau quá trình thực hiện, đề tài đã xây dựng được hệ thống
 - Xây dựng chức năng quản lý đầu sách, import/export Excel và lọc dữ liệu.
 - Xây dựng chức năng quản lý độc giả và khóa/mở tài khoản.
 - Xây dựng dashboard thống kê tổng quan.
+- Bổ sung đặt trước sách khi hết tồn kho, sách yêu thích và thông báo trong hệ thống.
+- Bổ sung mã QR/mã vạch cho đầu sách, nhật ký thao tác quản trị và vai trò thủ thư.
+- Bổ sung biểu đồ thống kê theo tháng, trạng thái phiếu mượn, sách được mượn nhiều và khoa/lớp.
 - Tích hợp Firebase Authentication, Cloud Firestore và Firebase Hosting.
 - Thiết lập Firestore Rules để kiểm soát quyền truy cập dữ liệu.
 
@@ -709,15 +714,12 @@ Một số khó khăn trong quá trình xây dựng hệ thống:
 
 Trong tương lai, hệ thống có thể được phát triển theo các hướng:
 
-- Bổ sung quét mã QR/mã vạch cho từng cuốn sách.
 - Gửi email tự động khi yêu cầu mượn được duyệt, sách gần đến hạn hoặc quá hạn.
 - Tích hợp thanh toán trực tuyến cho phí phạt.
-- Xây dựng báo cáo thống kê nâng cao theo tháng, học kỳ, khoa hoặc nhóm người dùng.
-- Bổ sung vai trò thủ thư để phân quyền chi tiết hơn.
+- Xây dựng báo cáo thống kê nâng cao có xuất file theo học kỳ, khoa hoặc nhóm người dùng.
 - Xây dựng backend riêng cho các nghiệp vụ quan trọng như import hàng loạt, tính phạt định kỳ và ghi log.
 - Tối ưu truy vấn Firestore khi số lượng sách, người dùng và phiếu mượn tăng lớn.
-- Cải thiện giao diện dashboard bằng biểu đồ trực quan.
-- Bổ sung chức năng đặt trước sách khi sách hết tồn kho.
+- Tối ưu thêm giao diện dashboard và bộ lọc báo cáo khi dữ liệu lớn.
 
 ---
 

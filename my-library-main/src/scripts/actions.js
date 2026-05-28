@@ -18,9 +18,17 @@ const onAuthStateChangedFn = authApi.onAuthStateChanged;
 const usersCollection = window.usersCollection;
 const booksCollection = window.booksCollection;
 const loansCollection = window.loansCollection;
+const reservationsCollection = collection(db, "reservations");
+const notificationsCollection = collection(db, "notifications");
+const favoritesCollection = collection(db, "favorites");
+const activityLogsCollection = collection(db, "activityLogs");
 const MAX_ACTIVE_BORROW = 3;  
         window.books = [];
         window.loans = [];
+        window.reservations = [];
+        window.notifications = [];
+        window.favorites = [];
+        window.activityLogs = [];
         window.currentUser = null;
         window.currentPage = 1;
         window.booksPerPage = 9;
@@ -28,6 +36,10 @@ const MAX_ACTIVE_BORROW = 3;
 
 let books = window.books;
 let loans = window.loans;
+let reservations = window.reservations;
+let notifications = window.notifications;
+let favorites = window.favorites;
+let activityLogs = window.activityLogs;
 let currentUser = window.currentUser;
 let currentPage = window.currentPage;
 let lastBPP = window.lastBPP ?? 9;
@@ -44,6 +56,10 @@ const ADMIN_BOOTSTRAP = {
 function syncState() {
   window.books = books;
   window.loans = loans;
+  window.reservations = reservations;
+  window.notifications = notifications;
+  window.favorites = favorites;
+  window.activityLogs = activityLogs;
   window.currentUser = currentUser;
   window.currentPage = currentPage;
   window.lastBPP = lastBPP;
@@ -121,6 +137,37 @@ function normalizeEmail(value) {
 function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(normalizeEmail(value));
 }
+
+function normalizeRole(value) {
+  const role = normalizeText(value).toLowerCase();
+  if (role === "admin" || role === "librarian" || role === "lecturer") return role;
+  return "student";
+}
+
+function isAdminRole(role) {
+  return normalizeRole(role) === "admin";
+}
+
+function isStaffRole(roleOrUser = currentUser) {
+  const role = typeof roleOrUser === "string" ? roleOrUser : roleOrUser?.role;
+  const normalized = normalizeRole(role);
+  return normalized === "admin" || normalized === "librarian";
+}
+
+function canManageUsers(user = currentUser) {
+  return isAdminRole(user?.role);
+}
+
+function roleLabel(role) {
+  const normalized = normalizeRole(role);
+  if (normalized === "admin") return "Admin";
+  if (normalized === "librarian") return "Thủ thư";
+  if (normalized === "lecturer") return "Giảng viên";
+  return "Sinh viên";
+}
+
+window.isStaffRole = isStaffRole;
+window.isAdminRole = isAdminRole;
 
 function isPermissionDeniedError(err) {
   const code = String(err?.code || "").toLowerCase();
@@ -230,17 +277,18 @@ async function ensureAuthUserIndex(authUid, userId, email = "", role = "") {
   }
 }
 
-async function ensureAdminRoleGrant(authUid, role = "") {
+async function ensureStaffRoleGrant(authUid, role = "") {
   const normalizedAuthUid = normalizeText(authUid);
-  if (!normalizedAuthUid || normalizeText(role) !== "admin") return;
+  const normalizedRole = normalizeRole(role);
+  if (!normalizedAuthUid || !isStaffRole(normalizedRole)) return;
 
   try {
     await setDoc(doc(db, "roles", normalizedAuthUid), {
-      role: "admin",
+      role: normalizedRole,
       updatedAt: Date.now()
     }, { merge: true });
   } catch (err) {
-    console.warn("Could not update admin role grant:", err);
+    console.warn("Could not update staff role grant:", err);
   }
 }
 
@@ -328,7 +376,7 @@ async function backfillLegacyAccountsForAdmin() {
 
       await ensureUsernameIndex(userId, email, authUid, role);
       await ensureAuthUserIndex(authUid, userId, email, role);
-      await ensureAdminRoleGrant(authUid, role);
+      await ensureStaffRoleGrant(authUid, role);
       await removeLegacyPasswordField(userId, {
         authUid,
         username: data.username || userId,
@@ -370,18 +418,45 @@ function schedulePostLoginMaintenance({ userId, email, authUid, role, patch = {}
     }),
     ensureUsernameIndex(userId, email, authUid, normalizedRole),
     ensureAuthUserIndex(authUid, userId, email, normalizedRole),
-    ensureAdminRoleGrant(authUid, normalizedRole)
+    ensureStaffRoleGrant(authUid, normalizedRole)
   ]).catch((err) => {
     console.warn("Post-login maintenance failed:", err);
   });
 }
 
 function getLoansSourceForCurrentUser() {
-  if (currentUser?.role === "admin") return loansCollection;
+  if (isStaffRole(currentUser)) return loansCollection;
   if (currentUser?.username && typeof queryFn === "function" && typeof whereFn === "function") {
     return queryFn(loansCollection, whereFn("username", "==", currentUser.username));
   }
   return null;
+}
+
+function getReservationsSourceForCurrentUser() {
+  if (isStaffRole(currentUser)) return reservationsCollection;
+  if (currentUser?.username && typeof queryFn === "function" && typeof whereFn === "function") {
+    return queryFn(reservationsCollection, whereFn("username", "==", currentUser.username));
+  }
+  return null;
+}
+
+function getNotificationsSourceForCurrentUser() {
+  if (isStaffRole(currentUser)) return notificationsCollection;
+  if (currentUser?.username && typeof queryFn === "function" && typeof whereFn === "function") {
+    return queryFn(notificationsCollection, whereFn("targetUsername", "==", currentUser.username));
+  }
+  return null;
+}
+
+function getFavoritesSourceForCurrentUser() {
+  if (currentUser?.username && typeof queryFn === "function" && typeof whereFn === "function") {
+    return queryFn(favoritesCollection, whereFn("username", "==", currentUser.username));
+  }
+  return null;
+}
+
+function getActivityLogsSourceForCurrentUser() {
+  return canManageUsers(currentUser) ? activityLogsCollection : null;
 }
 
 function resetRealtimeSync() {
@@ -619,12 +694,22 @@ window.formatBookCreatedAt = function (createdAt) {
 let realtimeStarted = false;
 let unsubscribeBooks = null;
 let unsubscribeLoans = null;
+let unsubscribeExtras = [];
 
 function renderDataDrivenViews() {
   window.renderAll?.();
-  if (currentUser?.role === "admin") {
+  window.updateNotificationBadge?.();
+  const activeSection = Array.from(document.querySelectorAll('[id^="section-"]'))
+    .find((sec) => sec.style.display !== "none")
+    ?.id?.replace(/^section-/, "");
+  if (activeSection === "favorites") window.renderFavorites?.();
+  if (activeSection === "notifications") window.renderNotifications?.();
+
+  if (isStaffRole(currentUser)) {
     window.renderAdminApprovals?.();
+    window.renderAdminReservations?.();
     window.renderAdminActiveLoans?.();
+    if (activeSection === "admin-logs") window.renderActivityLogs?.();
     const usersSection = document.getElementById("section-admin-users");
     if (usersSection && usersSection.style.display !== "none") window.renderUsers?.();
   } else {
@@ -636,9 +721,88 @@ function renderDataDrivenViews() {
 function startRealtimeSync() {
   if (realtimeStarted || typeof onSnapshot !== "function") return false;
   realtimeStarted = true;
-  const loansSource = getLoansSourceForCurrentUser();
+  const syncSources = [
+    {
+      source: booksCollection,
+      onData: (snapshot) => {
+        books = [];
+        snapshot.forEach((d) => books.push(normalizeBookRecord({ id: d.id, ...d.data() })));
+      },
+      label: "books"
+    }
+  ];
 
-  let pendingInitial = loansSource ? 2 : 1;
+  const loansSource = getLoansSourceForCurrentUser();
+  if (loansSource) {
+    syncSources.push({
+      source: loansSource,
+      onData: (snapshot) => {
+        loans = [];
+        snapshot.forEach((d) => loans.push({ id: d.id, ...d.data() }));
+      },
+      label: "loans"
+    });
+  } else {
+    loans = [];
+  }
+
+  const reservationsSource = getReservationsSourceForCurrentUser();
+  if (reservationsSource) {
+    syncSources.push({
+      source: reservationsSource,
+      onData: (snapshot) => {
+        reservations = [];
+        snapshot.forEach((d) => reservations.push({ id: d.id, ...d.data() }));
+      },
+      label: "reservations"
+    });
+  } else {
+    reservations = [];
+  }
+
+  const notificationsSource = getNotificationsSourceForCurrentUser();
+  if (notificationsSource) {
+    syncSources.push({
+      source: notificationsSource,
+      onData: (snapshot) => {
+        notifications = [];
+        snapshot.forEach((d) => notifications.push({ id: d.id, ...d.data() }));
+      },
+      label: "notifications"
+    });
+  } else {
+    notifications = [];
+  }
+
+  const favoritesSource = getFavoritesSourceForCurrentUser();
+  if (favoritesSource) {
+    syncSources.push({
+      source: favoritesSource,
+      onData: (snapshot) => {
+        favorites = [];
+        snapshot.forEach((d) => favorites.push({ id: d.id, ...d.data() }));
+      },
+      label: "favorites"
+    });
+  } else {
+    favorites = [];
+  }
+
+  const logsSource = getActivityLogsSourceForCurrentUser();
+  if (logsSource) {
+    syncSources.push({
+      source: logsSource,
+      onData: (snapshot) => {
+        activityLogs = [];
+        snapshot.forEach((d) => activityLogs.push({ id: d.id, ...d.data() }));
+      },
+      label: "activity logs"
+    });
+  } else {
+    activityLogs = [];
+  }
+
+  let pendingInitial = syncSources.length;
   updateAppDataState({
     loading: true,
     hasError: false
@@ -657,54 +821,46 @@ function startRealtimeSync() {
     }
   };
 
-  unsubscribeBooks = onSnapshot(
-    booksCollection,
-    (snapshot) => {
-      books = [];
-      snapshot.forEach((d) => books.push(normalizeBookRecord({ id: d.id, ...d.data() })));
-      syncState();
-      renderDataDrivenViews();
-      if (pendingInitial > 0) doneOne();
-    },
-    (error) => {
-      console.error("Realtime books error:", error);
-      window.showToast?.("Loi realtime books: " + error.message, "error", 4200);
-      updateAppDataState({ hasError: true });
-      if (pendingInitial > 0) doneOne();
-    }
-  );
-
-  if (loansSource) {
-    unsubscribeLoans = onSnapshot(
-      loansSource,
+  unsubscribeExtras = syncSources.map(({ source, onData, label }, index) => {
+    const unsubscribe = onSnapshot(
+      source,
       (snapshot) => {
-        loans = [];
-        snapshot.forEach((d) => loans.push({ id: d.id, ...d.data() }));
+        onData(snapshot);
         syncState();
         renderDataDrivenViews();
         if (pendingInitial > 0) doneOne();
       },
       (error) => {
-        console.error("Realtime loans error:", error);
-        window.showToast?.("Loi realtime loans: " + error.message, "error", 4200);
+        console.error(`Realtime ${label} error:`, error);
+        window.showToast?.(`Lỗi realtime ${label}: ${error.message}`, "error", 4200);
         updateAppDataState({ hasError: true });
         if (pendingInitial > 0) doneOne();
       }
     );
-  } else {
-    loans = [];
-    syncState();
-  }
+    if (index === 0) unsubscribeBooks = unsubscribe;
+    if (index === 1 && loansSource) unsubscribeLoans = unsubscribe;
+    return unsubscribe;
+  });
 
   window.stopRealtimeSync = function () {
-    if (typeof unsubscribeBooks === "function") unsubscribeBooks();
-    if (typeof unsubscribeLoans === "function") unsubscribeLoans();
+    unsubscribeExtras.forEach((unsubscribe) => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    });
     unsubscribeBooks = null;
     unsubscribeLoans = null;
+    unsubscribeExtras = [];
     realtimeStarted = false;
   };
 
   return true;
+}
+
+async function readSourceDocs(source, mapper = (id, data) => ({ id, ...data })) {
+  if (!source) return [];
+  const snapshot = await getDocs(source);
+  const rows = [];
+  snapshot.forEach((d) => rows.push(mapper(d.id, d.data() || {})));
+  return rows;
 }
 
 window.loadData = async function() {
@@ -716,67 +872,36 @@ window.loadData = async function() {
   });
   renderDataDrivenViews();
 
-  if (window.withLoading) {
-    await window.withLoading(async () => {
-      try {
-        const booksSnapshot = await getDocs(booksCollection);
-        books = [];
-        booksSnapshot.forEach((d) => books.push(normalizeBookRecord({ id: d.id, ...d.data() })));
+  const run = async () => {
+    try {
+      books = await readSourceDocs(booksCollection, (id, data) => normalizeBookRecord({ id, ...data }));
+      loans = await readSourceDocs(getLoansSourceForCurrentUser());
+      reservations = await readSourceDocs(getReservationsSourceForCurrentUser());
+      notifications = await readSourceDocs(getNotificationsSourceForCurrentUser());
+      favorites = await readSourceDocs(getFavoritesSourceForCurrentUser());
+      activityLogs = await readSourceDocs(getActivityLogsSourceForCurrentUser());
 
-        const loansSource = getLoansSourceForCurrentUser();
-        loans = [];
-        if (loansSource) {
-          const loansSnapshot = await getDocs(loansSource);
-          loansSnapshot.forEach((d) => loans.push({ id: d.id, ...d.data() }));
-        }
-
-        syncState();
-        updateAppDataState({
-          initialLoaded: true,
-          loading: false,
-          hasError: false
-        });
-        renderDataDrivenViews();
-      } catch (error) {
-        console.error("Load data error:", error);
-        window.showToast?.("Loi tai du lieu: " + error.message, "error", 4200);
-        updateAppDataState({
-          initialLoaded: true,
-          loading: false,
-          hasError: true
-        });
-        renderDataDrivenViews();
-      }
-    });
-    return;
-  }
-
-  try {
-    const booksSnapshot = await getDocs(booksCollection);
-    books = [];
-    booksSnapshot.forEach((d) => books.push(normalizeBookRecord({ id: d.id, ...d.data() })));
-    const loansSource = getLoansSourceForCurrentUser();
-    loans = [];
-    if (loansSource) {
-      const loansSnapshot = await getDocs(loansSource);
-      loansSnapshot.forEach((d) => loans.push({ id: d.id, ...d.data() }));
+      syncState();
+      updateAppDataState({
+        initialLoaded: true,
+        loading: false,
+        hasError: false
+      });
+      renderDataDrivenViews();
+    } catch (error) {
+      console.error("Load data error:", error);
+      window.showToast?.("Lỗi tải dữ liệu: " + error.message, "error", 4200);
+      updateAppDataState({
+        initialLoaded: true,
+        loading: false,
+        hasError: true
+      });
+      renderDataDrivenViews();
     }
-    syncState();
-    updateAppDataState({
-      initialLoaded: true,
-      loading: false,
-      hasError: false
-    });
-    renderDataDrivenViews();
-  } catch (error) {
-    console.error("Load data error:", error);
-    updateAppDataState({
-      initialLoaded: true,
-      loading: false,
-      hasError: true
-    });
-    renderDataDrivenViews();
-  }
+  };
+
+  if (window.withLoading) return window.withLoading(run);
+  return run();
 }
 window.requestBorrow = async function(bookId, triggerBtn) {
            if(!currentUser) return alert("Vui lòng đăng nhập!");
@@ -819,6 +944,20 @@ window.requestBorrow = async function(bookId, triggerBtn) {
       status: 'pending',
       date: new Date().toLocaleDateString('vi-VN')
     });
+    await notifyUser(
+      currentUser.username,
+      "Đã gửi yêu cầu mượn",
+      `Yêu cầu mượn sách "${book.title}" đã được gửi và đang chờ thủ thư duyệt.`,
+      "success",
+      "my-books",
+      getCurrentAuthUid()
+    );
+    await notifyStaff(
+      "Có yêu cầu mượn mới",
+      `${currentUser.username} đăng ký mượn "${book.title}".`,
+      "info",
+      "admin/approvals"
+    );
     alert("Đã gửi yêu cầu! Chờ Admin duyệt.");
     loadData();
   };
@@ -829,6 +968,168 @@ window.requestBorrow = async function(bookId, triggerBtn) {
   if (window.withLoading) return window.withLoading(run);
   return run();
 }
+
+window.reserveBook = async function(bookId, triggerBtn) {
+  if (!currentUser) return alert("Vui lòng đăng nhập!");
+
+  const locked = await isUserLocked(currentUser.username);
+  if (locked) return alert("Tài khoản đã bị KHÓA, không thể đặt trước sách!");
+
+  const book = books.find((b) => b.id === bookId);
+  if (!book) return alert("Không tìm thấy sách này!");
+
+  const hasLoan = loans.some((l) =>
+    l.username === currentUser.username &&
+    l.bookId === bookId &&
+    (l.status === "pending" || l.status === "active")
+  );
+  if (hasLoan) return alert("Bạn đã đăng ký hoặc đang mượn cuốn này rồi.");
+
+  const hasReservation = getWaitingReservationForBook(bookId, currentUser.username);
+  if (hasReservation) return alert("Bạn đã đặt trước cuốn sách này.");
+
+  if (!confirm(`Đặt trước cuốn "${book.title}"?`)) return;
+
+  const run = async () => {
+    await addDoc(reservationsCollection, {
+      username: currentUser.username,
+      userAuthUid: getCurrentAuthUid(),
+      bookId,
+      bookTitle: book.title,
+      status: "waiting",
+      createdAt: new Date().toISOString()
+    });
+    await notifyUser(
+      currentUser.username,
+      "Đã đặt trước sách",
+      `Bạn đã vào hàng chờ cho sách "${book.title}".`,
+      "success",
+      "my-books",
+      getCurrentAuthUid()
+    );
+    await notifyStaff(
+      "Có yêu cầu đặt trước",
+      `${currentUser.username} đặt trước "${book.title}".`,
+      "info",
+      "admin/reservations"
+    );
+    alert("Đã đặt trước sách. Thư viện sẽ thông báo khi có sách.");
+    loadData();
+  };
+
+  if (triggerBtn && window.runWithButtonBusy) return window.runWithButtonBusy(triggerBtn, "Đang đặt...", run);
+  if (window.withLoading) return window.withLoading(run);
+  return run();
+};
+
+window.cancelReservation = async function(reservationId, triggerBtn) {
+  const reservation = reservations.find((r) => r.id === reservationId);
+  if (!reservation || reservation.status !== "waiting") return alert("Phiếu đặt trước không hợp lệ.");
+  if (!isStaffRole(currentUser) && !sameUser(reservation.username, currentUser?.username)) return alert("Bạn không có quyền hủy phiếu này.");
+  if (!confirm(`Hủy đặt trước sách "${reservation.bookTitle}"?`)) return;
+
+  const run = async () => {
+    await updateDoc(doc(db, "reservations", reservationId), {
+      status: "cancelled",
+      cancelledAt: new Date().toISOString(),
+      cancelledBy: normalizeText(currentUser?.username || "")
+    });
+    reservation.status = "cancelled";
+    reservation.cancelledAt = new Date().toISOString();
+    syncState();
+    if (isStaffRole(currentUser)) {
+      await notifyUser(
+        reservation.username,
+        "Phiếu đặt trước đã hủy",
+        `Phiếu đặt trước sách "${reservation.bookTitle}" đã được hủy.`,
+        "warning",
+        "my-books",
+        reservation.userAuthUid || ""
+      );
+      await logActivity("cancel_reservation", "reservation", reservationId, `Hủy đặt trước "${reservation.bookTitle}" của ${reservation.username}`);
+    }
+    renderDataDrivenViews();
+  };
+
+  if (triggerBtn && window.runWithButtonBusy) return window.runWithButtonBusy(triggerBtn, "Đang hủy...", run);
+  if (window.withLoading) return window.withLoading(run);
+  return run();
+};
+
+window.fulfillReservation = async function(reservationId, triggerBtn) {
+  if (!isStaffRole(currentUser)) return alert("Bạn không có quyền xử lý đặt trước.");
+  const reservation = reservations.find((r) => r.id === reservationId);
+  if (!reservation || reservation.status !== "waiting") return alert("Phiếu đặt trước không hợp lệ.");
+  const book = books.find((b) => b.id === reservation.bookId);
+  if (!book) return alert("Không tìm thấy sách.");
+  if (Number(book.stock) <= 0) return alert("Sách vẫn chưa có tồn kho để tạo phiếu mượn.");
+  if (!confirm(`Tạo phiếu chờ duyệt cho ${reservation.username} mượn "${reservation.bookTitle}"?`)) return;
+
+  const run = async () => {
+    await addDoc(loansCollection, {
+      username: reservation.username,
+      userAuthUid: reservation.userAuthUid || "",
+      bookId: reservation.bookId,
+      bookTitle: reservation.bookTitle || book.title,
+      status: "pending",
+      date: new Date().toLocaleDateString("vi-VN"),
+      fromReservationId: reservationId
+    });
+    await updateDoc(doc(db, "reservations", reservationId), {
+      status: "fulfilled",
+      fulfilledAt: new Date().toISOString(),
+      fulfilledBy: normalizeText(currentUser.username || "")
+    });
+    reservation.status = "fulfilled";
+    syncState();
+    await notifyUser(
+      reservation.username,
+      "Đặt trước đã chuyển thành phiếu mượn",
+      `Sách "${reservation.bookTitle || book.title}" đã được tạo phiếu chờ duyệt.`,
+      "success",
+      "my-books",
+      reservation.userAuthUid || ""
+    );
+    await logActivity("fulfill_reservation", "reservation", reservationId, `Tạo phiếu mượn từ đặt trước "${reservation.bookTitle || book.title}"`);
+    renderDataDrivenViews();
+  };
+
+  if (triggerBtn && window.runWithButtonBusy) return window.runWithButtonBusy(triggerBtn, "Đang xử lý...", run);
+  if (window.withLoading) return window.withLoading(run);
+  return run();
+};
+
+window.toggleFavoriteBook = async function(bookId, triggerBtn) {
+  if (!currentUser) return alert("Vui lòng đăng nhập!");
+  const book = books.find((b) => b.id === bookId);
+  if (!book) return alert("Không tìm thấy sách này!");
+  const docId = favoriteDocId(currentUser.username, bookId);
+  const existing = favorites.find((f) => f.id === docId || (f.bookId === bookId && sameUser(f.username, currentUser.username)));
+
+  const run = async () => {
+    if (existing) {
+      await deleteDoc(doc(db, "favorites", existing.id || docId));
+      favorites = favorites.filter((f) => f.id !== (existing.id || docId));
+      window.showToast?.("Đã bỏ khỏi danh sách yêu thích.", "info");
+    } else {
+      const payload = {
+        username: currentUser.username,
+        userAuthUid: getCurrentAuthUid(),
+        bookId,
+        bookTitle: book.title,
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, "favorites", docId), payload);
+      favorites.push({ id: docId, ...payload });
+      window.showToast?.("Đã thêm vào sách yêu thích.", "success");
+    }
+    syncState();
+    renderDataDrivenViews();
+  };
+
+  if (triggerBtn && window.runWithButtonBusy) return window.runWithButtonBusy(triggerBtn, "...", run);
+  return run();
+};
 
 function parseVNDate(s) {
   const parts = String(s || "").trim().split("/");
@@ -896,6 +1197,215 @@ function toSafeText(value) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
+function docKeyPart(value) {
+  return encodeURIComponent(normalizeText(value)).replace(/\./g, "%2E");
+}
+
+function favoriteDocId(username, bookId) {
+  return `${docKeyPart(username)}__${docKeyPart(bookId)}`;
+}
+
+function getCurrentAuthUid() {
+  return normalizeText(currentUser?.authUid || auth?.currentUser?.uid || "");
+}
+
+function timestampOf(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function currentUserName() {
+  return normalizeText(currentUser?.name || currentUser?.username || "Hệ thống");
+}
+
+async function createNotification(payload = {}) {
+  if (!currentUser) return;
+  const title = normalizeText(payload.title);
+  const message = normalizeText(payload.message);
+  if (!title || !message) return;
+
+  try {
+    await addDoc(notificationsCollection, {
+      title,
+      message,
+      type: normalizeText(payload.type || "info"),
+      link: normalizeText(payload.link || ""),
+      targetUsername: normalizeText(payload.targetUsername || ""),
+      targetAuthUid: normalizeText(payload.targetAuthUid || ""),
+      targetRole: normalizeText(payload.targetRole || ""),
+      read: false,
+      createdAt: new Date().toISOString(),
+      actorUsername: normalizeText(currentUser.username || ""),
+      actorName: currentUserName()
+    });
+  } catch (err) {
+    console.warn("Could not create notification:", err);
+  }
+}
+
+async function notifyStaff(title, message, type = "info", link = "admin/approvals") {
+  await createNotification({
+    targetRole: "staff",
+    title,
+    message,
+    type,
+    link
+  });
+}
+
+async function notifyUser(username, title, message, type = "info", link = "notifications", authUid = "") {
+  await createNotification({
+    targetUsername: username,
+    targetAuthUid: authUid,
+    title,
+    message,
+    type,
+    link
+  });
+}
+
+async function logActivity(action, targetType, targetId, summary, details = {}) {
+  if (!isStaffRole(currentUser)) return;
+  try {
+    await addDoc(activityLogsCollection, {
+      action: normalizeText(action),
+      targetType: normalizeText(targetType),
+      targetId: normalizeText(targetId),
+      summary: normalizeText(summary),
+      details,
+      actorUsername: normalizeText(currentUser.username || ""),
+      actorName: currentUserName(),
+      actorRole: normalizeRole(currentUser.role),
+      createdAt: new Date().toISOString()
+    });
+  } catch (err) {
+    console.warn("Could not write activity log:", err);
+  }
+}
+
+function getWaitingReservationForBook(bookId, username = currentUser?.username) {
+  return reservations.find((r) =>
+    r.bookId === bookId &&
+    r.status === "waiting" &&
+    (!username || sameUser(r.username, username))
+  );
+}
+
+async function notifyNextReservationForBook(bookId) {
+  const book = books.find((b) => b.id === bookId);
+  const waiting = reservations
+    .filter((r) => r.bookId === bookId && r.status === "waiting")
+    .sort((a, b) => timestampOf(a.createdAt) - timestampOf(b.createdAt));
+  const next = waiting[0];
+  if (!next) return;
+  await notifyUser(
+    next.username,
+    "Sách đặt trước đã có lại",
+    `Sách "${next.bookTitle || book?.title || bookId}" hiện đã có trong kho. Bạn có thể chờ thủ thư tạo phiếu mượn hoặc đăng ký mượn lại.`,
+    "success",
+    "my-books",
+    next.userAuthUid || ""
+  );
+  await notifyStaff(
+    "Có sách trả cho hàng chờ",
+    `Sách "${next.bookTitle || book?.title || bookId}" vừa được trả. Độc giả đang chờ đầu tiên: ${next.username}.`,
+    "warning",
+    "admin/reservations"
+  );
+}
+
+function hashCodeText(text) {
+  let hash = 0;
+  const source = String(text || "");
+  for (let i = 0; i < source.length; i += 1) {
+    hash = ((hash << 5) - hash) + source.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36).toUpperCase();
+}
+
+function drawBarcode(canvas, value) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = "#111";
+  const code = `LIB-${hashCodeText(value)}`;
+  let x = 18;
+  const top = 14;
+  const barHeight = 62;
+  for (let i = 0; i < code.length; i += 1) {
+    const n = code.charCodeAt(i);
+    const bars = [1 + (n % 3), 1 + ((n >> 2) % 3), 1 + ((n >> 4) % 3)];
+    bars.forEach((bar, idx) => {
+      if (idx % 2 === 0) ctx.fillRect(x, top, bar, barHeight);
+      x += bar + 2;
+    });
+    x += 2;
+    if (x > width - 20) return;
+  }
+  ctx.font = "bold 14px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText(code, width / 2, height - 14);
+}
+
+window.openBookCodeModal = function(bookId) {
+  const book = books.find((b) => b.id === bookId);
+  if (!book) return alert("Không tìm thấy sách.");
+  const modal = document.getElementById("bookCodeModal");
+  const titleEl = document.getElementById("bookCodeTitle");
+  const qrBox = document.getElementById("bookQrBox");
+  const meta = document.getElementById("bookCodeMeta");
+  const canvas = document.getElementById("bookBarcodeCanvas");
+  if (!modal || !titleEl || !qrBox || !meta || !canvas) return;
+
+  const payload = JSON.stringify({
+    id: book.id,
+    title: book.title,
+    author: book.author
+  });
+  titleEl.textContent = `Mã sách: ${book.title}`;
+  qrBox.innerHTML = `
+    <img class="book-qr-img"
+      alt="QR ${toSafeText(book.title)}"
+      src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(payload)}">
+  `;
+  meta.innerHTML = `
+    <b>ID:</b> ${toSafeText(book.id)}<br>
+    <b>Tác giả:</b> ${toSafeText(book.author || "--")}<br>
+    <b>Danh mục:</b> ${toSafeText(book.category || "--")}
+  `;
+  canvas.dataset.bookTitle = book.title || "barcode";
+  drawBarcode(canvas, `${book.id}|${book.title}|${book.author}`);
+  modal.style.display = "flex";
+};
+
+window.downloadBookBarcode = function() {
+  const canvas = document.getElementById("bookBarcodeCanvas");
+  if (!canvas) return;
+  const link = document.createElement("a");
+  const name = String(canvas.dataset.bookTitle || "barcode")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/gi, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase() || "barcode";
+  link.href = canvas.toDataURL("image/png");
+  link.download = `${name}_barcode.png`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+window.printBookCode = function() {
+  window.print();
+};
 
 function sameUser(a, b) {
   return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
@@ -1008,6 +1518,7 @@ async function finalizeReturnLoan(loan, returnMethod = "admin-confirm") {
   }
 
   syncState();
+  if (outcome.bookId) await notifyNextReservationForBook(outcome.bookId);
   return { overdueDays: outcome.overdueDays, fineAmount: outcome.fineAmount };
 }
 window.deleteBook = async function(id, triggerBtn) {
@@ -1024,6 +1535,7 @@ window.deleteBook = async function(id, triggerBtn) {
             const run = async () => {
               try {
                   await deleteDoc(doc(db, "books", id));
+                  await logActivity("delete_book", "book", id, `Xóa sách ${id}`);
                   alert("Đã xóa thành công!");
                   loadData();
               } catch (e) {
@@ -1117,10 +1629,12 @@ window.handleSaveBook = async function() {
                 if (id) {
                     // --- �ANG S?A ---
                     await updateDoc(doc(db, "books", id), payload);
+                    await logActivity("update_book", "book", id, `Cập nhật sách "${payload.title}"`);
                     alert("Đã cập nhật sách!");
                 } else {
                     // --- �ANG TH�M M?I ---
-                    await addDoc(booksCollection, payload);
+                    const bookRef = await addDoc(booksCollection, payload);
+                    await logActivity("create_book", "book", bookRef.id, `Thêm sách "${payload.title}"`);
                     alert("Đã thêm sách mới!");
                 }
                 
@@ -1594,7 +2108,7 @@ window.handleLogin = async function() {
 
                 if (authUser) {
                     if (normalizeText(userData.role) === "admin") {
-                        await ensureAdminRoleGrant(authUser.uid, userData.role);
+                        await ensureStaffRoleGrant(authUser.uid, userData.role);
                     }
                     schedulePostLoginMaintenance({
                         userId: matchedUserId,
@@ -1740,8 +2254,11 @@ window.checkUserStatus = function() {
                     (currentUser.authUid && currentUser.authUid === authUser.uid) ||
                     (currentUser.email && normalizeEmail(currentUser.email) === normalizeEmail(authUser.email || ""))
                   );
-                const canUseAdmin = currentUser.role === 'admin' && hasFirebaseSession && !currentUser.mustChangePassword;
-                if(canUseAdmin) {
+                const canUseStaff = isStaffRole(currentUser) && hasFirebaseSession && !currentUser.mustChangePassword;
+                document.querySelectorAll(".admin-owner-only").forEach((el) => {
+                  el.style.display = canManageUsers(currentUser) ? "" : "none";
+                });
+                if(canUseStaff) {
                     if(menuAdmin) menuAdmin.style.display = 'block';
                     if(menuStudent) menuStudent.style.display = 'none';
                     if(mobileMenuAdmin) mobileMenuAdmin.style.display = 'block';
@@ -1928,6 +2445,16 @@ window.handleApprove = async function(btn, loanId, bookId, isApproved) {
         tableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 20px;">Không có yêu cầu nào mới</td></tr>`;
         }
 
+        await notifyUser(
+          loanInMem?.username,
+          "Yêu cầu mượn đã được duyệt",
+          `Sách "${loanInMem?.bookTitle || bookId}" đã được duyệt. Vui lòng đến thư viện nhận sách.`,
+          "success",
+          "my-books",
+          loanInMem?.userAuthUid || ""
+        );
+        await logActivity("approve_loan", "loan", loanId, `Duyệt mượn "${loanInMem?.bookTitle || bookId}" cho ${loanInMem?.username || ""}`);
+
         alert("Đã duyệt thành công!");
 
         } else {
@@ -1950,6 +2477,16 @@ window.handleApprove = async function(btn, loanId, bookId, isApproved) {
             tableBody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding: 20px;">Không có yêu cầu nào mới</td></tr>`;
         }
 
+        await notifyUser(
+          loanInMem?.username,
+          "Yêu cầu mượn bị từ chối",
+          `Yêu cầu mượn sách "${loanInMem?.bookTitle || bookId}" đã bị từ chối.`,
+          "warning",
+          "my-books",
+          loanInMem?.userAuthUid || ""
+        );
+        await logActivity("reject_loan", "loan", loanId, `Từ chối mượn "${loanInMem?.bookTitle || bookId}" của ${loanInMem?.username || ""}`);
+
         alert("Đã từ chối yêu cầu.");
         }
 
@@ -1969,7 +2506,7 @@ window.handleApprove = async function(btn, loanId, bookId, isApproved) {
 // 2. H�M HI?N TH? DUY?T MU?N CHO ADMIN (Menu: Duy?t y�u c?u)
 window.renderAdminApprovals = function () {
     const table = document.getElementById("adminApprovalTable");
-    if (!table || !currentUser || currentUser.role !== "admin") return;
+    if (!table || !isStaffRole(currentUser)) return;
 
     table.innerHTML = "";
 
@@ -1998,6 +2535,176 @@ window.renderAdminApprovals = function () {
         </tr>`;
     });
     };
+
+window.renderAdminReservations = function () {
+    const table = document.getElementById("adminReservationTable");
+    if (!table || !isStaffRole(currentUser)) return;
+
+    const waiting = reservations
+      .filter((r) => r.status === "waiting")
+      .sort((a, b) => timestampOf(a.createdAt) - timestampOf(b.createdAt));
+
+    table.innerHTML = "";
+    if (!waiting.length) {
+      table.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:20px; color:gray;">Không có yêu cầu đặt trước nào.</td></tr>`;
+      return;
+    }
+
+    waiting.forEach((reservation) => {
+      const book = books.find((b) => b.id === reservation.bookId);
+      const stock = Number(book?.stock || 0);
+      const canFulfill = stock > 0;
+      table.innerHTML += `
+        <tr>
+          <td>${toSafeText((reservation.id || "").slice(0, 5))}...</td>
+          <td><b>${toSafeText(reservation.username)}</b></td>
+          <td>${toSafeText(reservation.bookTitle || book?.title || "--")}</td>
+          <td>${stock}</td>
+          <td>${toSafeText(formatDisplayDateTime(reservation.createdAt))}</td>
+          <td>
+            <div class="action-group">
+              <button class="btn-table btn-approve" ${canFulfill ? "" : "disabled"}
+                onclick="fulfillReservation('${reservation.id}', this)">Tạo phiếu</button>
+              <button class="btn-table btn-reject" onclick="cancelReservation('${reservation.id}', this)">Hủy</button>
+            </div>
+          </td>
+        </tr>`;
+    });
+};
+
+window.renderFavorites = function () {
+  const list = document.getElementById("favoriteBookList");
+  if (!list) return;
+  if (!currentUser) {
+    list.innerHTML = `<div style="grid-column:1/-1; text-align:center; color:gray;">Vui lòng đăng nhập để xem sách yêu thích.</div>`;
+    return;
+  }
+
+  const favoriteBookIds = new Set(
+    favorites
+      .filter((f) => sameUser(f.username, currentUser.username))
+      .map((f) => f.bookId)
+  );
+  const favoriteBooks = books.filter((book) => favoriteBookIds.has(book.id));
+  list.innerHTML = "";
+  if (!favoriteBooks.length) {
+    list.innerHTML = `<div style="grid-column:1/-1; text-align:center; color:gray; padding:20px;">Bạn chưa đánh dấu sách yêu thích.</div>`;
+    return;
+  }
+  favoriteBooks.forEach((book) => {
+    list.innerHTML += `
+      <div class="book-card">
+        <div class="book-title">${toSafeText(book.title || "")}</div>
+        <div class="book-author">${toSafeText(book.author || "")}</div>
+        <div>Kho: ${Number(book.stock) || 0}</div>
+        <div class="card-actions">
+          <button class="btn-table favorite-toggle is-favorite" onclick="toggleFavoriteBook('${book.id}', this)">★</button>
+          ${Number(book.stock) > 0
+            ? `<button class="btn-borrow" onclick="requestBorrow('${book.id}', this)">ĐĂNG KÝ MƯỢN</button>`
+            : `<button class="btn-borrow" onclick="reserveBook('${book.id}', this)">ĐẶT TRƯỚC</button>`}
+        </div>
+      </div>`;
+  });
+};
+
+function relevantNotifications() {
+  if (!currentUser) return [];
+  return notifications
+    .filter((n) =>
+      sameUser(n.targetUsername, currentUser.username) ||
+      (isStaffRole(currentUser) && normalizeText(n.targetRole) === "staff")
+    )
+    .sort((a, b) => timestampOf(b.createdAt) - timestampOf(a.createdAt));
+}
+
+window.updateNotificationBadge = function () {
+  const badge = document.getElementById("notificationBadge");
+  if (!badge) return;
+  const unread = relevantNotifications().filter((n) => !n.read).length;
+  badge.hidden = unread <= 0;
+  badge.textContent = String(unread);
+};
+
+window.renderNotifications = function () {
+  const list = document.getElementById("notificationList");
+  if (!list) return;
+  const rows = relevantNotifications();
+  list.innerHTML = "";
+  if (!rows.length) {
+    list.innerHTML = `<div class="notification-empty">Chưa có thông báo.</div>`;
+    return;
+  }
+
+  rows.forEach((item) => {
+    list.innerHTML += `
+      <div class="notification-item ${item.read ? "" : "unread"}">
+        <div>
+          <div class="notification-title">${toSafeText(item.title || "Thông báo")}</div>
+          <div class="notification-message">${toSafeText(item.message || "")}</div>
+          <div class="notification-time">${toSafeText(formatDisplayDateTime(item.createdAt))}</div>
+        </div>
+        <div class="notification-actions">
+          ${item.link ? `<button class="btn-table" onclick="navigateTo('${toSafeText(item.link)}')">Mở</button>` : ""}
+          <button class="btn-table btn-approve" ${item.read ? "disabled" : ""} onclick="markNotificationRead('${item.id}', this)">Đã đọc</button>
+        </div>
+      </div>`;
+  });
+};
+
+window.markNotificationRead = async function(notificationId, triggerBtn) {
+  const item = notifications.find((n) => n.id === notificationId);
+  if (!item) return;
+  const run = async () => {
+    await updateDoc(doc(db, "notifications", notificationId), {
+      read: true,
+      readAt: new Date().toISOString()
+    });
+    item.read = true;
+    syncState();
+    window.renderNotifications?.();
+    window.updateNotificationBadge?.();
+  };
+  if (triggerBtn && window.runWithButtonBusy) return window.runWithButtonBusy(triggerBtn, "...", run);
+  return run();
+};
+
+window.markAllNotificationsRead = async function() {
+  const unread = relevantNotifications().filter((n) => !n.read);
+  if (!unread.length) return;
+  await Promise.all(unread.map((n) => updateDoc(doc(db, "notifications", n.id), {
+    read: true,
+    readAt: new Date().toISOString()
+  })));
+  unread.forEach((n) => { n.read = true; });
+  syncState();
+  window.renderNotifications?.();
+  window.updateNotificationBadge?.();
+};
+
+window.renderActivityLogs = function () {
+  const table = document.getElementById("activityLogTable");
+  if (!table || !canManageUsers(currentUser)) return;
+  const rows = activityLogs
+    .slice()
+    .sort((a, b) => timestampOf(b.createdAt) - timestampOf(a.createdAt))
+    .slice(0, 80);
+  table.innerHTML = "";
+  if (!rows.length) {
+    table.innerHTML = `<tr><td colspan="5" style="text-align:center; color:gray; padding:18px;">Chưa có nhật ký thao tác.</td></tr>`;
+    return;
+  }
+  rows.forEach((log) => {
+    table.innerHTML += `
+      <tr>
+        <td>${toSafeText(formatDisplayDateTime(log.createdAt))}</td>
+        <td>${toSafeText(log.actorName || log.actorUsername || "--")}</td>
+        <td>${toSafeText(log.action || "--")}</td>
+        <td>${toSafeText(log.targetType || "--")} / ${toSafeText(log.targetId || "--")}</td>
+        <td>${toSafeText(log.summary || "--")}</td>
+      </tr>`;
+  });
+};
+
 window.renderAdminActiveLoans = function() {
         const table = document.getElementById('adminActiveLoansTable');
         if (!table) return;
@@ -2184,6 +2891,15 @@ window.handleDirectReturn = async function(triggerBtn) {
   const run = async () => {
     try {
       const { overdueDays, fineAmount } = await finalizeReturnLoan(loan, "admin-direct");
+      await notifyUser(
+        loan.username,
+        "Đã xác nhận trả trực tiếp",
+        `Sách "${loan.bookTitle}" đã được xác nhận trả tại quầy. Phạt: ${fineAmount.toLocaleString("vi-VN")} d.`,
+        "success",
+        "my-books",
+        loan.userAuthUid || ""
+      );
+      await logActivity("direct_return", "loan", loan.id, `Trả trực tiếp "${loan.bookTitle}" của ${loan.username}`);
       alert(`Đã xác nhận trả trực tiếp.\nQuá hạn: ${overdueDays} ngày\nPhạt: ${fineAmount.toLocaleString("vi-VN")} d`);
       renderAll();
       renderAdminActiveLoans();
@@ -2216,6 +2932,15 @@ window.adminReturnBook = async function(btn, loanId, bookId) {
         if (!loan) throw new Error("Không tìm thấy phiếu mượn.");
 
         const { overdueDays, fineAmount } = await finalizeReturnLoan(loan, "admin-confirm");
+        await notifyUser(
+          loan.username,
+          "Đã xác nhận trả sách",
+          `Sách "${loan.bookTitle}" đã được xác nhận trả. Phạt: ${fineAmount.toLocaleString("vi-VN")} d.`,
+          "success",
+          "my-books",
+          loan.userAuthUid || ""
+        );
+        await logActivity("return_book", "loan", loanId, `Xác nhận trả "${loan.bookTitle}" của ${loan.username}`);
 
         if (rowEl) rowEl.remove();
         renderAll();
@@ -2270,6 +2995,15 @@ window.updateDueDate = async function(loanId, triggerBtn) {
                   loan.dueDate = nextDueStr;
                   loan.renewalCount = nextCount;
                   syncState();
+                  await notifyUser(
+                    loan.username,
+                    "Sách đã được gia hạn",
+                    `Sách "${loan.bookTitle}" được gia hạn đến ${nextDueStr}.`,
+                    "success",
+                    "my-books",
+                    loan.userAuthUid || ""
+                  );
+                  await logActivity("renew_loan", "loan", loanId, `Gia hạn "${loan.bookTitle}" đến ${nextDueStr}`);
                   renderAdminActiveLoans();
                   alert(`Gia hạn thành công (${nextCount}/${MAX_RENEWALS}).`);
               } catch (e) {
@@ -2318,9 +3052,60 @@ window.returnBook = async function(loanId, bookId) {
             } catch(e) { console.error(e); alert("Lỗi: " + e.message); }
         }
     //Th?ng k� / ngu?i d�ng / l?ch s? sinh vi�n
+function countBy(rows, keyFn) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = normalizeText(keyFn(row)) || "Không rõ";
+    map.set(key, (map.get(key) || 0) + 1);
+  });
+  return Array.from(map.entries()).map(([label, value]) => ({ label, value }));
+}
+
+function renderBarChart(containerId, rows, emptyText = "Chưa có dữ liệu") {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const data = rows
+    .filter((item) => Number(item.value) > 0)
+    .slice(0, 6);
+  el.innerHTML = "";
+  if (!data.length) {
+    el.innerHTML = `<div class="chart-empty">${emptyText}</div>`;
+    return;
+  }
+  const max = Math.max(...data.map((item) => Number(item.value) || 0), 1);
+  data.forEach((item) => {
+    const pct = Math.max(6, Math.round(((Number(item.value) || 0) / max) * 100));
+    el.innerHTML += `
+      <div class="bar-row">
+        <div class="bar-label">${toSafeText(item.label)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <div class="bar-value">${Number(item.value) || 0}</div>
+      </div>`;
+  });
+}
+
+async function renderDepartmentChart() {
+  const el = document.getElementById("chart-dept-loans");
+  if (!el || !isStaffRole(currentUser)) return;
+  try {
+    const snapshot = await getDocs(usersCollection);
+    const userDept = new Map();
+    snapshot.forEach((d) => {
+      const user = d.data() || {};
+      userDept.set(String(user.username || d.id).toLowerCase(), normalizeText(user.dept || user.class || "Không rõ"));
+    });
+    const rows = countBy(loans, (loan) => userDept.get(String(loan.username || "").toLowerCase()) || "Không rõ")
+      .sort((a, b) => b.value - a.value);
+    renderBarChart("chart-dept-loans", rows);
+  } catch (err) {
+    console.warn("Could not render department chart:", err);
+    if (el) el.innerHTML = `<div class="chart-empty">Không tải được dữ liệu khoa/lớp.</div>`;
+  }
+}
+
 window.renderDashboard = function() {
             // Ch? ch?y n?u l� Admin
-            if (!currentUser || currentUser.role !== 'admin') return;
+            if (!isStaffRole(currentUser)) return;
 
             console.log("Đang tính toán thống kê...");
 
@@ -2333,6 +3118,8 @@ window.renderDashboard = function() {
             }, 0);
             // �?m s? phi?u c� tr?ng th�i 'active' (dang mu?n)
             const borrowedCount = loans.filter(l => l.status === 'active').length;
+            const reservedCount = reservations.filter((r) => r.status === "waiting").length;
+            const overdueCount = loans.filter((l) => l.status === "active" && calcOverdueDays(getLoanDueDate(l), new Date()) > 0).length;
             // T�m s�ch s?p h?t (dưới 2 cuốn) và gộp trùng theo tên
             const lowStockThreshold = 2;
             const groupedByTitle = new Map();
@@ -2365,12 +3152,16 @@ window.renderDashboard = function() {
             const elStock = document.getElementById('stat-total-stock');
             const elBorrow = document.getElementById('stat-borrowed');
             const elLow = document.getElementById('stat-low-stock');
+            const elReserved = document.getElementById('stat-reserved');
+            const elOverdue = document.getElementById('stat-overdue');
             const elList = document.getElementById('low-stock-list');
 
             if(elTotal) elTotal.innerText = totalTitles;
             if(elStock) elStock.innerText = totalStock;
             if(elBorrow) elBorrow.innerText = borrowedCount;
             if(elLow) elLow.innerText = lowStockBooks.length;
+            if(elReserved) elReserved.innerText = reservedCount;
+            if(elOverdue) elOverdue.innerText = overdueCount;
 
             // C. Hi?n th? danh s�ch c?nh b�o
             if (elList) {
@@ -2388,12 +3179,38 @@ window.renderDashboard = function() {
                     });
                 }
             }
+
+            const monthlyRows = countBy(loans, (loan) => {
+              const d = parseAnyDate(loan.borrowDate || loan.date || loan.createdAt);
+              if (!d) return "Không rõ";
+              return `${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+            }).sort((a, b) => a.label.localeCompare(b.label, "vi")).slice(-6);
+            renderBarChart("chart-monthly-loans", monthlyRows);
+
+            const topBookRows = countBy(loans, (loan) => loan.bookTitle || loan.bookId)
+              .sort((a, b) => b.value - a.value);
+            renderBarChart("chart-top-books", topBookRows);
+
+            const statusRows = countBy(loans, (loan) => {
+              const status = String(loan.status || "");
+              if (status === "pending") return "Chờ duyệt";
+              if (status === "active") return "Đang mượn";
+              if (status === "returned") return "Đã trả";
+              if (status === "rejected") return "Từ chối";
+              return "Khác";
+            });
+            renderBarChart("chart-loan-status", statusRows);
+            renderDepartmentChart();
         }
 // H�M HI?N TH? DANH S�CH USER T? FIREBASE (C?P NH?T M?I)
         // ============================================================
 window.renderUsers = async function() {
             const table = document.getElementById('userTable');
             if (!table) return;
+            if (!canManageUsers(currentUser)) {
+              table.innerHTML = '<tr><td colspan="4" style="text-align:center">Chỉ admin được quản lý độc giả.</td></tr>';
+              return;
+            }
 
             const requestId = `${Date.now()}-${Math.random()}`;
             table.dataset.requestId = requestId;
@@ -2424,6 +3241,8 @@ window.renderUsers = async function() {
   let roleHtml = "";
   if (u.role === "admin") {
     roleHtml = `<span style="color:red; font-weight:bold;">Admin</span>`;
+  } else if (u.role === "librarian") {
+    roleHtml = `<span style="color:#8e44ad; font-weight:bold;">Thủ thư</span>`;
   } else if (u.role === "lecturer" || String(u.username || userId || "").toLowerCase().startsWith("gv")) {
     roleHtml = `<span style="color:blue; font-weight:bold;">Giảng viên</span>`;
   } else {
@@ -2454,6 +3273,9 @@ window.renderUsers = async function() {
           </button>
           <button class="btn-table btn-approve" onclick="viewUserLoanHistory('${u.username || userId}')">
             Lịch sử
+          </button>
+          <button class="btn-table" onclick="changeUserRole('${userId}', '${role}')">
+            Vai trò
           </button>
         </div>
       </td>
@@ -2536,18 +3358,64 @@ window.viewUserLoanHistory = function(userId) {
             modal.style.display = "flex";
         }
         // 1. H�M HI?N TH? S�CH C?A SINH VI�N (Menu: S�ch & L?ch s?)
+window.changeUserRole = async function(userId, currentRole = "student") {
+  if (!canManageUsers(currentUser)) return alert("Chỉ admin được phân quyền.");
+  const next = prompt("Nhập vai trò mới: student, lecturer, librarian, admin", normalizeRole(currentRole));
+  if (next === null) return;
+  const nextRole = normalizeRole(next);
+  if (!["student", "lecturer", "librarian", "admin"].includes(nextRole)) {
+    return alert("Vai trò không hợp lệ.");
+  }
+  if (!confirm(`Đổi vai trò ${userId} thành ${roleLabel(nextRole)}?`)) return;
+
+  try {
+    const userRef = doc(db, "users", userId);
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) return alert("Không tìm thấy tài khoản.");
+    const user = snap.data() || {};
+    await updateDoc(userRef, {
+      role: nextRole,
+      updatedAt: Date.now()
+    });
+    if (user.authUid) {
+      if (isStaffRole(nextRole)) {
+        await setDoc(doc(db, "roles", user.authUid), {
+          role: nextRole,
+          updatedAt: Date.now()
+        }, { merge: true });
+      } else {
+        try {
+          await deleteDoc(doc(db, "roles", user.authUid));
+        } catch (err) {
+          console.warn("Could not remove role grant:", err);
+        }
+      }
+      await ensureAuthUserIndex(user.authUid, user.username || userId, user.email || "", nextRole);
+    }
+    await ensureUsernameIndex(user.username || userId, user.email || "", user.authUid || "", nextRole);
+    await logActivity("change_role", "user", userId, `Đổi vai trò ${userId} thành ${roleLabel(nextRole)}`);
+    alert("Đã cập nhật vai trò.");
+    await renderUsers();
+  } catch (err) {
+    console.error(err);
+    alert("Lỗi cập nhật vai trò: " + err.message);
+  }
+};
+
 window.renderStudentLoans = function() {
             if (!currentUser) return;
 
             // L?y 2 c�i b?ng trong HTML
             const currentTable = document.getElementById('myCurrentBookTable');
             const historyTable = document.getElementById('myHistoryBookTable');
+            const reservationTable = document.getElementById('myReservationTable');
 
             if (!currentTable || !historyTable) return;
 
             // X�a n?i dung cu
             currentTable.innerHTML = "";
             historyTable.innerHTML = "";
+            if (reservationTable) reservationTable.innerHTML = "";
 
             // L?c s�ch c?a ngu?i n�y
             const myLoans = loans.filter(l => sameUser(l.username, currentUser.username));
@@ -2602,6 +3470,39 @@ window.renderStudentLoans = function() {
 
             // N?u kh�ng c� s�ch n�o
             if (currentTable.innerHTML === "") currentTable.innerHTML = "<tr><td colspan='5' style='text-align:center'>Bạn chưa mượn cuốn nào.</td></tr>";
+            if (historyTable.innerHTML === "") historyTable.innerHTML = "<tr><td colspan='5' style='text-align:center'>Chưa có lịch sử trả sách.</td></tr>";
+
+            if (reservationTable) {
+              const myReservations = reservations
+                .filter((r) => sameUser(r.username, currentUser.username))
+                .sort((a, b) => timestampOf(b.createdAt) - timestampOf(a.createdAt));
+              myReservations.forEach((reservation) => {
+                const status = reservation.status === "waiting"
+                  ? '<span style="color:#8e44ad; font-weight:bold;">Đang chờ</span>'
+                  : reservation.status === "fulfilled"
+                    ? '<span style="color:#27ae60; font-weight:bold;">Đã tạo phiếu</span>'
+                    : '<span style="color:#7f8c8d;">Đã hủy</span>';
+                const note = reservation.status === "waiting"
+                  ? "Thư viện sẽ thông báo khi có sách"
+                  : reservation.status === "fulfilled"
+                    ? "Theo dõi ở bảng chờ duyệt"
+                    : "Không còn hiệu lực";
+                const action = reservation.status === "waiting"
+                  ? `<button class="btn-table btn-reject" onclick="cancelReservation('${reservation.id}', this)">Hủy</button>`
+                  : "";
+                reservationTable.innerHTML += `
+                  <tr>
+                    <td>${toSafeText(reservation.bookTitle || "--")}</td>
+                    <td>${toSafeText(formatDisplayDateTime(reservation.createdAt))}</td>
+                    <td>${status}</td>
+                    <td>${toSafeText(note)}</td>
+                    <td>${action}</td>
+                  </tr>`;
+              });
+              if (reservationTable.innerHTML === "") {
+                reservationTable.innerHTML = "<tr><td colspan='5' style='text-align:center'>Bạn chưa đặt trước sách nào.</td></tr>";
+              }
+            }
         }
 // H�M �?I M?T KH?U
         // ============================================================
@@ -2778,6 +3679,7 @@ window.handleAddBookPanel = async function (e) {
         });
 
         const ref = await addDoc(collection(db, "books"), payload);
+        await logActivity("create_book", "book", ref.id, `Thêm sách "${payload.title}"`);
 
         // c?p nh?t m?ng local d? UI th?y ngay (n?u b?n d�ng window.books)
         if (Array.isArray(window.books)) {
@@ -2975,8 +3877,8 @@ window.downloadBookImportTemplate = function () {
 };
 
 window.importBooksExcel = async function (triggerBtn) {
-  if (!currentUser || currentUser.role !== "admin") {
-    alert("Chỉ admin mới được import dữ liệu.");
+  if (!isStaffRole(currentUser)) {
+    alert("Chỉ admin hoặc thủ thư mới được import dữ liệu.");
     return;
   }
 
@@ -3055,6 +3957,7 @@ window.importBooksExcel = async function (triggerBtn) {
       for (const payload of payloads) {
         await addDoc(booksCollection, payload);
       }
+      await logActivity("import_books", "book", "batch", `Import ${payloads.length} sách từ Excel/CSV`);
 
       input.value = "";
       await loadData();
@@ -3088,7 +3991,7 @@ window.handleAddUserPanel = async function (e) {
     const dept = document.getElementById('uDept').value.trim();
     const pass = document.getElementById('uPass').value.trim();
     const roleRaw = String(document.getElementById('uRole').value || '').toLowerCase();
-    const role = roleRaw === 'lecturer' ? 'lecturer' : 'student';
+    const role = normalizeRole(roleRaw);
 
     if (!username || !name || !email || !className || !dept || !pass) {
         if (msg) {
@@ -3171,6 +4074,8 @@ window.handleAddUserPanel = async function (e) {
         });
         await ensureUsernameIndex(userId, normalizedEmail, authUser?.uid || "", role);
         await ensureAuthUserIndex(authUser?.uid || "", userId, normalizedEmail, role);
+        await ensureStaffRoleGrant(authUser?.uid || "", role);
+        await logActivity("create_user", "user", userId, `Tạo tài khoản ${roleLabel(role)} ${userId}`);
 
         if (typeof signOutFn === "function" && accountCreationAuth.currentUser) {
         await signOutFn(accountCreationAuth);
@@ -3226,6 +4131,7 @@ window.toggleUserLock = async function (userId, currentLocked, triggerBtn) {
   const run = async () => {
     try {
       await updateDoc(doc(db, "users", userId), { locked: !currentLocked });
+      await logActivity(currentLocked ? "unlock_user" : "lock_user", "user", userId, `${currentLocked ? "Mở khóa" : "Khóa"} tài khoản ${userId}`);
       alert(currentLocked ? "Đã mở khóa!" : "Đã khóa!");
       if (window.renderUsers) await renderUsers();
     } catch (e) {

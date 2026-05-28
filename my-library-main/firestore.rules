@@ -13,6 +13,15 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == "admin";
     }
 
+    function isStaff() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/roles/$(request.auth.uid))
+        && (
+          get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == "admin"
+          || get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == "librarian"
+        );
+    }
+
     function isSeedAdmin() {
       return signedIn()
         && request.auth.uid == "2rEc9TY961QMmj9VF3e6JdP428y2"
@@ -40,6 +49,31 @@ service cloud.firestore {
     }
 
     function isOwnLoan(data) {
+      return signedIn()
+        && (
+          data.userAuthUid == request.auth.uid
+          || (data.username is string && data.username == currentUsername())
+        );
+    }
+
+    function isOwnReservation(data) {
+      return signedIn()
+        && (
+          data.userAuthUid == request.auth.uid
+          || (data.username is string && data.username == currentUsername())
+        );
+    }
+
+    function isOwnNotification(data) {
+      return signedIn()
+        && (
+          data.targetAuthUid == request.auth.uid
+          || (data.targetUsername is string && data.targetUsername == currentUsername())
+          || (data.targetRole == "staff" && isStaff())
+        );
+    }
+
+    function isOwnFavorite(data) {
       return signedIn()
         && (
           data.userAuthUid == request.auth.uid
@@ -80,11 +114,11 @@ service cloud.firestore {
     }
 
     match /users/{username} {
-      allow get: if isAdmin()
+      allow get: if isStaff()
         || (isSeedAdmin() && username == "admin")
         || isSelfProfile()
         || isSelfUsernameIndex(username);
-      allow list: if isAdmin();
+      allow list: if isStaff();
       allow create: if isAdmin()
         || (isSeedAdmin()
           && username == "admin"
@@ -113,13 +147,51 @@ service cloud.firestore {
 
     match /books/{bookId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if isStaff();
     }
 
     match /loans/{loanId} {
-      allow get, list: if isAdmin() || isOwnLoan(resource.data);
-      allow create: if isOwnLoan(request.resource.data);
-      allow update, delete: if isAdmin();
+      allow get, list: if isStaff() || isOwnLoan(resource.data);
+      allow create: if isStaff() || isOwnLoan(request.resource.data);
+      allow update, delete: if isStaff();
+    }
+
+    match /reservations/{reservationId} {
+      allow get, list: if isStaff() || isOwnReservation(resource.data);
+      allow create: if isOwnReservation(request.resource.data)
+        && request.resource.data.status == "waiting";
+      allow update: if isStaff()
+        || (isOwnReservation(resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "status", "cancelledAt", "cancelledBy"
+          ])
+          && request.resource.data.status == "cancelled");
+      allow delete: if isStaff();
+    }
+
+    match /notifications/{notificationId} {
+      allow get, list: if isStaff() || isOwnNotification(resource.data);
+      allow create: if isStaff()
+        || isOwnNotification(request.resource.data)
+        || (signedIn() && request.resource.data.targetRole == "staff");
+      allow update: if isStaff()
+        || (isOwnNotification(resource.data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "read", "readAt"
+          ]));
+      allow delete: if isAdmin();
+    }
+
+    match /favorites/{favoriteId} {
+      allow get, list: if isOwnFavorite(resource.data);
+      allow create: if isOwnFavorite(request.resource.data);
+      allow update: if isOwnFavorite(resource.data) && isOwnFavorite(request.resource.data);
+      allow delete: if isOwnFavorite(resource.data);
+    }
+
+    match /activityLogs/{logId} {
+      allow get, list, delete: if isAdmin();
+      allow create: if isStaff();
     }
 
     match /{document=**} {

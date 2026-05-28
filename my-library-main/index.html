@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Thư viện Nhóm CNPM - PTIT HCM</title>
-  <link rel="stylesheet" href="src/styles/main.css?v=20260528f">
+  <link rel="stylesheet" href="src/styles/main.css?v=20260528g">
 </head>
 <body>
   <div id="rulesModal" class="modal-overlay" style="display: none;">
@@ -110,6 +110,29 @@
         </thead>
         <tbody id="userLoanHistoryTable"></tbody>
       </table>
+    </div>
+  </div>
+
+  <div id="bookCodeModal" class="modal-overlay" style="display:none;"
+       onclick="if(event.target.id==='bookCodeModal') toggleModal('bookCodeModal')">
+    <div class="modal-box book-code-modal">
+      <span class="close-btn" onclick="toggleModal('bookCodeModal')">×</span>
+      <h3 id="bookCodeTitle" style="margin:0 0 12px; color: var(--ptit-red);">Mã sách</h3>
+      <div class="book-code-layout">
+        <div class="book-code-panel">
+          <div class="book-code-label">QR</div>
+          <div id="bookQrBox" class="book-qr-box"></div>
+        </div>
+        <div class="book-code-panel">
+          <div class="book-code-label">Barcode</div>
+          <canvas id="bookBarcodeCanvas" width="320" height="110"></canvas>
+        </div>
+      </div>
+      <div id="bookCodeMeta" class="book-code-meta"></div>
+      <div class="book-code-actions">
+        <button class="btn-table" type="button" onclick="printBookCode()">In mã</button>
+        <button class="btn-table btn-approve" type="button" onclick="downloadBookBarcode()">Tải barcode</button>
+      </div>
     </div>
   </div>
 
@@ -245,14 +268,18 @@
 
     <div id="mobileMenuStudent" style="display:none;">
       <a href="#" onclick="showSection('my-books'); closeMobileNav()">Sách & Lịch sử</a>
+      <a href="#" onclick="showSection('favorites'); closeMobileNav()">Sách yêu thích</a>
+      <a href="#" onclick="showSection('notifications'); closeMobileNav()">Thông báo</a>
       <a href="#" onclick="showSection('profile'); closeMobileNav()">Hồ sơ cá nhân</a>
     </div>
 
     <div id="mobileMenuAdmin" style="display:none;">
       <a href="#" onclick="showSection('admin-approvals'); closeMobileNav()">Duyệt yêu cầu mượn</a>
+      <a href="#" onclick="showSection('admin-reservations'); closeMobileNav()">Đặt trước sách</a>
       <a href="#" onclick="showSection('admin-active-loans'); closeMobileNav()">Quản lý đang mượn</a>
       <a href="#" onclick="showSection('admin-books'); closeMobileNav()">Quản lý sách</a>
-      <a href="#" onclick="showSection('admin-users'); closeMobileNav()">Quản lý độc giả</a>
+      <a href="#" class="admin-owner-only" onclick="showSection('admin-users'); closeMobileNav()">Quản lý độc giả</a>
+      <a href="#" class="admin-owner-only" onclick="showSection('admin-logs'); closeMobileNav()">Nhật ký thao tác</a>
       <a href="#" onclick="showSection('dashboard'); closeMobileNav()">Thống kê</a>
     </div>
 
@@ -280,6 +307,8 @@
         <div class="sidebar-title" style="background: #2ecc71;">KHU VỰC CÁ NHÂN</div>
         <ul class="sidebar-list">
           <li><a href="#" onclick="showSection('my-books')">📚 Sách & Lịch sử</a></li>
+          <li><a href="#" onclick="showSection('favorites')">⭐ Sách yêu thích</a></li>
+          <li><a href="#" onclick="showSection('notifications')">🔔 Thông báo <span id="notificationBadge" class="menu-badge" hidden>0</span></a></li>
           <li><a href="#" onclick="showSection('profile')">👤 Hồ sơ cá nhân</a></li>
         </ul>
       </div>
@@ -289,9 +318,11 @@
         <ul class="sidebar-list">
           <li><a href="#" onclick="showSection('admin-approvals')">📝 Duyệt yêu cầu mượn</a></li>
 
+          <li><a href="#" onclick="showSection('admin-reservations')">📌 Đặt trước sách</a></li>
           <li><a href="#" onclick="showSection('admin-active-loans')">📖 Quản lý Đang mượn</a></li>
           <li><a href="#" onclick="showSection('admin-books')">⚙️ Quản lý Sách</a></li>
-          <li><a href="#" onclick="showSection('admin-users')">👥 Quản lý Độc giả</a></li>
+          <li class="admin-owner-only"><a href="#" onclick="showSection('admin-users')">👥 Quản lý Độc giả</a></li>
+          <li class="admin-owner-only"><a href="#" onclick="showSection('admin-logs')">🧾 Nhật ký thao tác</a></li>
           <li><a href="#" onclick="showSection('dashboard'); renderDashboard();">📊 Thống kê</a></li>
         </ul>
       </div>
@@ -530,7 +561,27 @@
             <thead><tr><th>Tên sách</th><th>Ngày mượn</th><th>Hạn trả</th><th>Trạng thái</th><th>Ghi chú</th></tr></thead>
             <tbody id="myHistoryBookTable"></tbody>
         </table>
+
+        <br><br>
+        <div class="section-header"><h3 class="section-title" style="color:#666">Sách đã đặt trước</h3></div>
+        <table class="data-table">
+            <thead><tr><th>Tên sách</th><th>Ngày đặt</th><th>Trạng thái</th><th>Ghi chú</th><th>Hành động</th></tr></thead>
+            <tbody id="myReservationTable"></tbody>
+        </table>
       </div>
+
+<div id="section-favorites" style="display: none;">
+  <div class="section-header"><h3 class="section-title">Sách yêu thích</h3></div>
+  <div class="book-grid" id="favoriteBookList"></div>
+</div>
+
+<div id="section-notifications" style="display: none;">
+  <div class="section-header">
+    <h3 class="section-title">Thông báo</h3>
+    <button class="btn-table" type="button" onclick="markAllNotificationsRead()">Đánh dấu đã đọc</button>
+  </div>
+  <div id="notificationList" class="notification-list"></div>
+</div>
 
 <div id="section-admin-approvals" style="display: none;">
   <div class="section-header" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
@@ -551,6 +602,27 @@
       </tr>
     </thead>
     <tbody id="adminApprovalTable"></tbody>
+  </table>
+</div>
+
+<div id="section-admin-reservations" style="display: none;">
+  <div class="section-header" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+    <h3 class="section-title">Danh sách đặt trước sách</h3>
+    <button class="btn-table" type="button" onclick="loadData()">↻ Tải lại</button>
+  </div>
+
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th style="width:90px;">Mã</th>
+        <th style="width:160px;">Độc giả</th>
+        <th>Sách</th>
+        <th style="width:120px;">Tồn kho</th>
+        <th style="width:120px;">Ngày đặt</th>
+        <th style="width:210px;">Thao tác</th>
+      </tr>
+    </thead>
+    <tbody id="adminReservationTable"></tbody>
   </table>
 </div>
 
@@ -660,6 +732,8 @@
           <select id="uRole" required>
             <option value="student" selected>Sinh viên</option>
             <option value="lecturer">Giảng viên</option>
+            <option value="librarian">Thủ thư</option>
+            <option value="admin">Admin</option>
           </select>
         </div>
       </div>
@@ -839,6 +913,25 @@
   </table>
 </div>
 
+<div id="section-admin-logs" style="display: none;">
+  <div class="section-header">
+    <h3 class="section-title">Nhật ký thao tác quản trị</h3>
+    <button class="btn-table" type="button" onclick="renderActivityLogs()">↻ Làm mới</button>
+  </div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Thời gian</th>
+        <th>Người thao tác</th>
+        <th>Hành động</th>
+        <th>Đối tượng</th>
+        <th>Nội dung</th>
+      </tr>
+    </thead>
+    <tbody id="activityLogTable"></tbody>
+  </table>
+</div>
+
       <div id="section-dashboard" style="display: none;">
         <div class="section-header"><h3 class="section-title">Tổng quan hệ thống</h3></div>
         <div class="stats-grid">
@@ -846,6 +939,26 @@
           <div class="stat-card green"><h3>Tổng tồn kho</h3><p id="stat-total-stock">0</p></div>
           <div class="stat-card orange"><h3>Đang cho mượn</h3><p id="stat-borrowed">0</p></div>
           <div class="stat-card red"><h3>Sắp hết hàng</h3><p id="stat-low-stock">0</p></div>
+          <div class="stat-card purple"><h3>Đang đặt trước</h3><p id="stat-reserved">0</p></div>
+          <div class="stat-card dark"><h3>Quá hạn</h3><p id="stat-overdue">0</p></div>
+        </div>
+        <div class="dashboard-grid">
+          <div class="dashboard-panel">
+            <h4>Mượn sách theo tháng</h4>
+            <div id="chart-monthly-loans" class="bar-chart"></div>
+          </div>
+          <div class="dashboard-panel">
+            <h4>Sách được mượn nhiều</h4>
+            <div id="chart-top-books" class="bar-chart"></div>
+          </div>
+          <div class="dashboard-panel">
+            <h4>Trạng thái phiếu mượn</h4>
+            <div id="chart-loan-status" class="bar-chart"></div>
+          </div>
+          <div class="dashboard-panel">
+            <h4>Lượt mượn theo khoa/lớp</h4>
+            <div id="chart-dept-loans" class="bar-chart"></div>
+          </div>
         </div>
         <div style="margin-top: 20px; padding: 15px; background: #fff; border: 1px solid #ddd; border-radius: 5px;">
           <h4 style="margin-top: 0; color: #555;"> Các cuốn sách sắp hết (Dưới 2 cuốn)</h4>
@@ -904,7 +1017,7 @@
  
 
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="src/scripts/main.js?v=20260528f" type="module"></script>
+  <script src="src/scripts/main.js?v=20260528g" type="module"></script>
 
 </body>
 </html>
