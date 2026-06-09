@@ -1539,12 +1539,18 @@ button.is-busy{
   display:flex;
   gap:8px;
   align-items:stretch;
+  justify-content:center;
 }
 
 .card-actions .btn-borrow{
   flex:1;
   margin:0 !important;
   width:auto !important;
+}
+
+.book-card .card-actions .btn-table{
+  min-width:58px;
+  justify-content:center;
 }
 
 .favorite-toggle{
@@ -1779,7 +1785,96 @@ button.is-busy{
   }
 }
 
-#section-admin-books .data-table td:last-child,
-#section-admin-books .data-table th:last-child{
-  width:300px;
+#section-admin-books .admin-book-table-wrap{
+  width:100%;
+  overflow-x:auto;
+  border-radius:12px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.06);
+  -webkit-overflow-scrolling: touch;
+}
+
+#section-admin-books .admin-book-table{
+  min-width:1120px;
+  margin-top:0;
+  box-shadow:none;
+}
+
+#section-admin-books .admin-book-table .book-id-cell{
+  white-space:nowrap;
+  font-weight:700;
+  color:#555;
+}
+
+#section-admin-books .admin-book-table td:nth-child(8),
+#section-admin-books .admin-book-table td:nth-child(10){
+  white-space:nowrap;
+}
+
+#section-admin-books .admin-book-table td:last-child,
+#section-admin-books .admin-book-table th:last-child{
+  width:236px;
+}
+
+#section-admin-books .admin-book-table .action-group{
+  width:100%;
+  gap:8px;
+}
+
+#section-admin-books .admin-book-table .btn-table{
+  min-width:64px;
+  height:36px;
+  line-height:36px;
+  padding:0 10px !important;
+  justify-content:center;
+}
+
+/* Mobile book cards */
+@media (max-width: 640px){
+  .main-content{
+    padding: 8px 10px !important;
+  }
+
+  .book-grid{
+    grid-template-columns: minmax(0, 420px) !important;
+    justify-content: center;
+    gap: 16px !important;
+  }
+
+  .book-card{
+    min-height: 0;
+    padding: 14px !important;
+    border-radius: 10px;
+  }
+
+  .book-img,
+  .book-cover-fallback{
+    height: clamp(190px, 58vw, 245px) !important;
+    border-radius: 10px;
+    margin-bottom: 10px;
+  }
+
+  .book-title{
+    min-height: 0;
+    margin: 10px 0 6px;
+    font-size: 15px;
+    line-height: 1.35;
+  }
+
+  .book-author{
+    min-height: 0;
+    margin-bottom: 10px;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .book-author + div{
+    margin-top: 2px;
+    font-size: 14px;
+  }
+
+  .card-actions,
+  .book-card .action-group{
+    gap: 10px;
+    padding-top: 14px;
+  }
 }

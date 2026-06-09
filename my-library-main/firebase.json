@@ -8,6 +8,8 @@
       "firebase.json",
       "firestore.rules",
       "README.md",
+      "BAO_CAO_DU_AN.md",
+      "**/*.log",
       "archive/**",
       "tools/**",
       "index.html.bak*",

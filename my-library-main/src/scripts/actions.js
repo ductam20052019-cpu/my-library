@@ -3018,22 +3018,22 @@ window.updateDueDate = async function(loanId, triggerBtn) {
             if (window.withLoading) return window.withLoading(run);
             return run();
         }
-        // 2. H�M S?A NG�Y MU?N (�? ch?nh ng�y th�ng)
+        // 2. Hàm sửa ngày mượn
 window.editLoanDate = async function(loanId, currentDate) {
-            // Hi?n khung nh?p ng�y m?i
-            const newDate = prompt("Nh?p ng�y mu?n m?i (dd/mm/yyyy):", currentDate);
+            // Hiển thị khung nhập ngày mới
+            const newDate = prompt("Nhập ngày mượn mới (dd/mm/yyyy):", currentDate);
 
             if (newDate && newDate !== currentDate) {
-                // Ki?m tra d?nh d?ng ng�y so b? (ph?i c� d?u /)
+                // Kiểm tra định dạng ngày sơ bộ
                 if (!newDate.includes('/') || newDate.length < 8) {
                     return alert("Định dạng ngày không hợp lệ! Vui lòng nhập: ngày/tháng/năm");
                 }
 
                 try {
-                    // C?p nh?t l�n Firebase
+                    // Cập nhật lên Firebase
                     await updateDoc(doc(db, "loans", loanId), { date: newDate });
                     alert("Đã cập nhật ngày mượn!");
-                    loadData(); // Load l?i d? h? th?ng t? t�nh l?i H?n tr?
+                    loadData(); // Load lại để hệ thống tự tính lại hạn trả
                 } catch (e) {
                     console.error(e);
                     alert("Lỗi cập nhật: " + e.message);

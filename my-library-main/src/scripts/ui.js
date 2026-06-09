@@ -602,6 +602,14 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+function formatAdminBookId(value) {
+  const id = String(value || "").trim();
+  if (!id) return "--";
+  if (id.startsWith("seed-book-")) return `seed-${id.slice("seed-book-".length)}`;
+  if (id.length <= 12) return id;
+  return `${id.slice(0, 4)}...${id.slice(-6)}`;
+}
+
 function safeImageUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -621,7 +629,7 @@ function buildBookCoverHtml(book) {
   const imageUrl = safeImageUrl(book?.img);
   const fallback = `
     <div class="book-cover-fallback" aria-label="${escapeHtml(title)}">
-      <span>${escapeHtml(title)}</span>
+      <span>Chưa có ảnh bìa</span>
     </div>`;
 
   if (!imageUrl) return fallback;
@@ -787,7 +795,7 @@ window.renderAdminBooks = function () {
 
     adminTable.innerHTML += `
       <tr>
-        <td>${escapeHtml((book.id || "").substring(0, 6))}</td>
+        <td class="book-id-cell" title="${escapeHtml(book.id || "")}">${escapeHtml(formatAdminBookId(book.id))}</td>
         <td style="font-weight:bold">${escapeHtml(book.title || "")}</td>
         <td>${escapeHtml(book.author || "")}</td>
         <td>${escapeHtml(book.category || "--")}</td>

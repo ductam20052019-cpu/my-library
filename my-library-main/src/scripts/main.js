@@ -1,6 +1,6 @@
-import "../services/firebase.js?v=20260528g";
-import "./ui.js?v=20260528g";
-import "./actions.js?v=20260528g";
+import "../services/firebase.js?v=20260529c";
+import "./ui.js?v=20260529c";
+import "./actions.js?v=20260529c";
 
 window.addEventListener("DOMContentLoaded", () => {
   if (window.checkUserStatus) window.checkUserStatus();
